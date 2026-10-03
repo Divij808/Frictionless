@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Habits · Frictionless{% endblock %}{% block content %}
+<div class="topbar"><div><h1>Habits</h1><p>Create habits and schedule upcoming sessions.</p></div><div class="coin-pill">🪙 {{coins}}</div></div>
+<section class="card"><h2>Add Habit</h2><form method="post" class="grid grid-3"><label>Name<input name="habit_name" required></label><label>Icon<input name="icon" value="🔥" maxlength="2"></label><label>Frequency<select name="frequency"><option>Daily</option><option>Weekly</option></select></label><label>Time<input type="time" name="habit_time" value="08:00"></label><label>Duration<input type="number" name="duration" value="30" min="5"></label><label>Start date<input type="date" name="start_date" value="{{today_date}}"></label><button class="btn">Add & Schedule 30 Days</button></form></section>
+<section class="card"><h2>Your Habits</h2><div class="grid grid-3">{%for h in habits%}<div class="stat">{{h.icon}} <strong>{{h.name}}</strong><span>{{h.frequency}} · {{h.time}} · {{h.duration}} min</span></div>{%else%}<div class="notice">No habits yet.</div>{%endfor%}</div></section>
+{% endblock %}

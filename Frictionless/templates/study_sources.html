@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Study Sources · Frictionless{% endblock %}{% block content %}
+<div class="topbar"><div><h1>Study Sources</h1><p>Upload documents for Epoch to search.</p></div><a class="btn" href="{{url_for('study_workspace')}}">Open Workspace</a></div>
+<section class="card"><h2>Upload PDF or TXT</h2><form method="post" action="{{url_for('study_upload')}}" enctype="multipart/form-data" class="actions"><input type="file" name="file" accept=".pdf,.txt" required><button class="btn">Upload & Index</button></form></section>
+<section class="card"><h2>Your Sources</h2>{%for source in sources%}<div class="task-row"><div><strong>{{source.filename}}</strong><div class="meta">{{source.chunks}} chunks · {{source.characters}} characters</div></div><form method="post" action="{{url_for('study_delete_source',source_id=source.id)}}"><button class="btn danger small">Delete</button></form></div>{%else%}<div class="notice">No sources uploaded.</div>{%endfor%}</section>
+{% endblock %}

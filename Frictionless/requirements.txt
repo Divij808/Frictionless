@@ -1,0 +1,8 @@
+Flask
+Werkzeug
+google-auth
+google-auth-oauthlib
+google-api-python-client
+pypdf
+transformers
+torch

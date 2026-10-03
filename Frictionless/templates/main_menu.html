@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Main Menu · Frictionless{% endblock %}{% block content %}
+<div class="topbar"><div><h1>Main Menu</h1><p>Your central launchpad for Frictionless.</p></div><div class="coin-pill">🪙 {{coins}} coins</div></div>
+<div class="hero-grid">
+<a class="hero-card" href="{{url_for('dashboard')}}">📅<h3>Tasks & Schedule</h3><p>Plan work, deadlines and calendar time.</p></a>
+<a class="hero-card" href="{{url_for('habits')}}">🔥<h3>Habits</h3><p>Build recurring routines.</p></a>
+<a class="hero-card" href="{{url_for('quick_links')}}">🔗<h3>Quick Links</h3><p>Organise useful websites.</p></a>
+<a class="hero-card" href="{{url_for('shopping')}}">🛍️<h3>Shopping</h3><p>Spend coins on rewards.</p></a>
+<a class="hero-card" href="{{url_for('loans')}}">💷<h3>Loans</h3><p>Monitor repayments.</p></a>
+<a class="hero-card" href="{{url_for('goals')}}">🎯<h3>Progress</h3><p>Track aims and objectives.</p></a>
+<a class="hero-card" href="{{url_for('health_section',section='body')}}">❤️<h3>Health</h3><p>Body, eating and exercise.</p></a>
+<a class="hero-card" href="{{url_for('study_home')}}">📚<h3>Study Hub</h3><p>Upload sources and create revision material with Epoch.</p></a>
+{% for tab in tabs %}<a class="hero-card" href="{{url_for('blank_page',tab_id=tab.id)}}">{{tab.icon or '📄'}}<h3>{{tab.name}}</h3><p>Custom Frictionless page.</p></a>{% endfor %}
+</div>
+<div class="grid grid-3">
+<div class="stat"><span>Open Tasks</span><strong>{{task_count}}</strong></div><div class="stat"><span>Goals</span><strong>{{goal_count}}</strong></div><div class="stat"><span>Coins</span><strong>{{coins}} 🪙</strong></div>
+</div>
+{% endblock %}

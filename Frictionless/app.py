@@ -3,9 +3,16 @@ import sqlite3
 import datetime as dt
 from functools import wraps
 from urllib.parse import urlparse
+from pathlib import Path
+import json
+import uuid
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.security import generate_password_hash, check_password_hash
+from document.reader import extract_text
+from document.chunker import chunk_text
+from ai.generator import LocalAI
+from rag.retriever import Retriever
 
 try:
     from google.auth.transport.requests import Request
@@ -16,7 +23,7 @@ except ImportError:
     Request = Credentials = InstalledAppFlow = build = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FRICTIONLESS_SECRET_KEY", "super_secret_frictionless_key")
+app.secret_key = os.environ.get("EPOCH_SECRET_KEY", "super_secret_epoch_key")
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -27,7 +34,7 @@ COINS_PER_COMPLETION = 10
 
 
 def db():
-    conn = sqlite3.connect("frictionles.db")
+    conn = sqlite3.connect("epoch.db")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -470,7 +477,7 @@ def login():
 @login_required
 def main_menu():
     conn=db(); context=dashboard_context(conn); context["task_count"]=conn.execute("SELECT COUNT(*) c FROM tasks WHERE username=? AND completed=0",(session["user"],)).fetchone()["c"]; context["goal_count"]=conn.execute("SELECT COUNT(*) c FROM goals WHERE username=?",(session["user"],)).fetchone()["c"]; conn.close()
-    return render_template("dashboard.html",page="main",**context)
+    return render_template("main_menu.html",page="main",**context)
 
 
 @app.route("/dashboard", methods=["GET","POST"])
@@ -505,7 +512,7 @@ def dashboard():
     except ValueError: week_offset=0
     schedules,monday=build_schedule(conn,username,week_offset)
     context=dashboard_context(conn); context.update({"page":"dashboard","day_schedules":schedules,"week_offset":week_offset,"target_monday":monday.strftime("%B %d, %Y"),"today_date":dt.date.today().isoformat()})
-    conn.close(); return render_template("dashboard.html",**context)
+    conn.close(); return render_template("tasks.html",**context)
 
 
 @app.route("/page/<int:tab_id>")
@@ -515,7 +522,7 @@ def blank_page(tab_id):
     if not tab: conn.close(); return redirect(url_for("main_menu"))
     blocks=conn.execute("SELECT * FROM page_blocks WHERE tab_id=? AND username=? ORDER BY block_order,id",(tab_id,session["user"])).fetchall()
     context=dashboard_context(conn); context.update({"page":"custom","page_tab":tab,"blocks":blocks}); conn.close()
-    return render_template("dashboard.html",**context)
+    return render_template("custom_page.html",**context)
 
 
 @app.route("/add-tab",methods=["POST"])
@@ -620,7 +627,7 @@ def habits():
                 schedule_task(conn,username,name,duration,"Low",0,d,time,deadline,0,service,is_habit=True)
             conn.commit()
         conn.close(); return redirect(url_for("habits"))
-    habits_rows=conn.execute("SELECT * FROM habits WHERE username=? AND active=1 ORDER BY id",(username,)).fetchall(); recent=conn.execute("SELECT name,task_date,completed FROM tasks WHERE username=? AND is_habit=1 ORDER BY task_date DESC LIMIT 100",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"habits","habits":habits_rows,"recent_habits":recent}); conn.close(); return render_template("dashboard.html",**context)
+    habits_rows=conn.execute("SELECT * FROM habits WHERE username=? AND active=1 ORDER BY id",(username,)).fetchall(); recent=conn.execute("SELECT name,task_date,completed FROM tasks WHERE username=? AND is_habit=1 ORDER BY task_date DESC LIMIT 100",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"habits","habits":habits_rows,"recent_habits":recent,"today_date":dt.date.today().isoformat()}); conn.close(); return render_template("habits.html",**context)
 
 
 @app.route("/shopping",methods=["GET","POST"])
@@ -635,7 +642,7 @@ def shopping():
         except ValueError: duration=0
         if name and cost>=0: conn.execute("INSERT INTO shop_items(username,name,description,cost,duration,reward_type,icon) VALUES(?,?,?,?,?,?,?)",(username,name,request.form.get("description",""),cost,duration,request.form.get("reward_type","task"),request.form.get("icon","🎁"))); conn.commit()
         conn.close(); return redirect(url_for("shopping"))
-    items=conn.execute("SELECT * FROM shop_items WHERE username IS NULL OR username=? ORDER BY cost,id",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"shopping","shop_items":items}); conn.close(); return render_template("dashboard.html",**context)
+    items=conn.execute("SELECT * FROM shop_items WHERE username IS NULL OR username=? ORDER BY cost,id",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"shopping","shop_items":items}); conn.close(); return render_template("shopping.html",**context)
 
 
 @app.route("/shop/redeem/<int:item_id>",methods=["POST"])
@@ -665,7 +672,7 @@ def quick_links():
             if raw and not urlparse(raw).scheme: raw="https://"+raw
             if title and raw: conn.execute("INSERT INTO quick_links(username,folder_id,title,url,icon) VALUES(?,?,?,?,?)",(username,folder, title,raw,request.form.get("icon","🔗")))
         conn.commit(); conn.close(); return redirect(url_for("quick_links"))
-    folders=conn.execute("SELECT * FROM quick_link_folders WHERE username=? ORDER BY name",(username,)).fetchall(); links=conn.execute("SELECT * FROM quick_links WHERE username=? ORDER BY title",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"quick","link_folders":folders,"quick_links":links}); conn.close(); return render_template("dashboard.html",**context)
+    folders=conn.execute("SELECT * FROM quick_link_folders WHERE username=? ORDER BY name",(username,)).fetchall(); links=conn.execute("SELECT * FROM quick_links WHERE username=? ORDER BY title",(username,)).fetchall(); context=dashboard_context(conn); context.update({"page":"quick","link_folders":folders,"quick_links":links}); conn.close(); return render_template("quick_links.html",**context)
 
 
 @app.route("/quick-links/delete/<int:link_id>",methods=["POST"])
@@ -690,7 +697,7 @@ def loans():
         name=request.form.get("name","").strip()
         if name and amount>=0: conn.execute("INSERT INTO loans(username,name,amount,paid,due_date,note) VALUES(?,?,?,?,?,?)",(username,name,amount,max(0,paid),request.form.get("due_date") or None,request.form.get("note",""))); conn.commit()
         conn.close(); return redirect(url_for("loans"))
-    rows=conn.execute("SELECT * FROM loans WHERE username=? ORDER BY due_date IS NULL,due_date",(username,)).fetchall(); total=sum(r["amount"] for r in rows); paid=sum(r["paid"] for r in rows); remaining=max(0,total-paid); progress=round((paid/total)*100) if total else 0; context=dashboard_context(conn); context.update({"page":"loans","loans":rows,"loan_total":total,"loan_paid":paid,"loan_remaining":remaining,"loan_progress":progress}); conn.close(); return render_template("dashboard.html",**context)
+    rows=conn.execute("SELECT * FROM loans WHERE username=? ORDER BY due_date IS NULL,due_date",(username,)).fetchall(); total=sum(r["amount"] for r in rows); paid=sum(r["paid"] for r in rows); remaining=max(0,total-paid); progress=round((paid/total)*100) if total else 0; context=dashboard_context(conn); context.update({"page":"loans","loans":rows,"loan_total":total,"loan_paid":paid,"loan_remaining":remaining,"loan_progress":progress}); conn.close(); return render_template("loans.html",**context)
 
 
 @app.route("/loans/pay/<int:loan_id>",methods=["POST"])
@@ -714,7 +721,7 @@ def goals():
         except ValueError: progress=0
         if name: conn.execute("INSERT INTO goals(username,category,name,kind,parent_id,progress,due_date,notes) VALUES(?,?,?,?,?,?,?,?)",(username,category,name,kind,parent,progress,request.form.get("due_date") or None,request.form.get("notes",""))); conn.commit()
         conn.close(); return redirect(url_for("goals",tab=category.lower()))
-    selected=request.args.get("tab","career").capitalize(); rows=conn.execute("SELECT * FROM goals WHERE username=? AND category=? ORDER BY id",(username,selected)).fetchall(); parents=[r for r in rows if r["kind"] in ("Aim","Objective")]; context=dashboard_context(conn); context.update({"page":"goals","goal_tab":selected,"goals":rows,"goal_parents":parents}); conn.close(); return render_template("dashboard.html",**context)
+    selected=request.args.get("tab","career").capitalize(); rows=conn.execute("SELECT * FROM goals WHERE username=? AND category=? ORDER BY id",(username,selected)).fetchall(); parents=[r for r in rows if r["kind"] in ("Aim","Objective")]; context=dashboard_context(conn); context.update({"page":"goals","goal_tab":selected,"goals":rows,"goal_parents":parents}); conn.close(); return render_template("goals.html",**context)
 
 
 @app.route("/goals/update/<int:goal_id>",methods=["POST"])
@@ -868,7 +875,329 @@ def health_section(section):
         "selected_entries": selected_entries,
     })
     conn.close()
-    return render_template("dashboard.html", **context)
+    return render_template("health.html", **context)
+
+
+
+# -------------------- Study Hub / Epoch --------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+EPOCH_DATA_DIR = BASE_DIR / "epoch_data"
+EPOCH_UPLOAD_DIR = BASE_DIR / "epoch_uploads"
+EPOCH_DATA_DIR.mkdir(exist_ok=True)
+EPOCH_UPLOAD_DIR.mkdir(exist_ok=True)
+_epoch_ai = None
+
+
+def get_epoch_ai():
+    """Load the local transformer model only when the Study Hub is first used."""
+    global _epoch_ai
+    if _epoch_ai is None:
+        _epoch_ai = LocalAI()
+    return _epoch_ai
+
+
+def epoch_user_paths():
+    username = session["user"]
+    safe_user = "".join(ch for ch in username if ch.isalnum() or ch in ("-", "_")) or "user"
+    data_dir = EPOCH_DATA_DIR / safe_user
+    upload_dir = EPOCH_UPLOAD_DIR / safe_user
+    data_dir.mkdir(parents=True, exist_ok=True)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir, upload_dir
+
+
+def load_epoch_sources():
+    data_dir, _ = epoch_user_paths()
+    source_file = data_dir / "sources.json"
+    if not source_file.exists():
+        return []
+    try:
+        return json.loads(source_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_epoch_sources(sources):
+    data_dir, _ = epoch_user_paths()
+    (data_dir / "sources.json").write_text(
+        json.dumps(sources, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def epoch_retriever():
+    data_dir, _ = epoch_user_paths()
+    return Retriever(data_dir / "index.json")
+
+
+@app.route("/study")
+@login_required
+def study_home():
+    conn = db()
+    context = dashboard_context(conn)
+    conn.close()
+    return render_template("study_home.html", page="study", **context)
+
+
+@app.route("/study/sources")
+@login_required
+def study_sources():
+    conn = db()
+    context = dashboard_context(conn)
+    conn.close()
+    context.update({"page": "study", "sources": load_epoch_sources()})
+    return render_template("study_sources.html", **context)
+
+
+@app.route("/study/upload", methods=["POST"])
+@login_required
+def study_upload():
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        flash("Choose a PDF or TXT file first.", "error")
+        return redirect(url_for("study_sources"))
+
+    extension = Path(uploaded.filename).suffix.lower()
+    if extension not in {".pdf", ".txt"}:
+        flash("Only PDF and TXT files are supported.", "error")
+        return redirect(url_for("study_sources"))
+
+    source_id = uuid.uuid4().hex
+    safe_name = Path(uploaded.filename).name
+    stored_name = f"{source_id}{extension}"
+    _, upload_dir = epoch_user_paths()
+    path = upload_dir / stored_name
+    uploaded.save(path)
+
+    try:
+        text = extract_text(path)
+        if not text.strip():
+            raise ValueError("No readable text was found in this file.")
+        chunks = chunk_text(text)
+        epoch_retriever().add_document(source_id, safe_name, chunks)
+
+        sources = load_epoch_sources()
+        sources.append({
+            "id": source_id,
+            "filename": safe_name,
+            "stored_name": stored_name,
+            "chunks": len(chunks),
+            "characters": len(text),
+        })
+        save_epoch_sources(sources)
+        flash(f"Added {safe_name} with {len(chunks)} searchable chunks.", "success")
+    except Exception as exc:
+        if path.exists():
+            path.unlink()
+        flash(f"Could not process the document: {exc}", "error")
+
+    return redirect(url_for("study_sources"))
+
+
+@app.route("/study/delete/<source_id>", methods=["POST"])
+@login_required
+def study_delete_source(source_id):
+    sources = load_epoch_sources()
+    source = next((s for s in sources if s["id"] == source_id), None)
+    if source:
+        _, upload_dir = epoch_user_paths()
+        path = upload_dir / source["stored_name"]
+        if path.exists():
+            path.unlink()
+        save_epoch_sources([s for s in sources if s["id"] != source_id])
+        epoch_retriever().remove_document(source_id)
+        flash("Source removed.", "success")
+    return redirect(url_for("study_sources"))
+
+
+@app.route("/study/workspace", methods=["GET", "POST"])
+@login_required
+def study_workspace():
+    answer = None
+    answer_sources = []
+    result = None
+    result_title = None
+    selected_action = None
+
+    if request.method == "POST":
+        mode = request.form.get("mode", "")
+        retriever = epoch_retriever()
+
+        if mode == "ask":
+            question = request.form.get("question", "").strip()
+            if not question:
+                flash("Enter a question.", "error")
+            else:
+                matches = retriever.search(question, top_k=5)
+                if not matches:
+                    answer = "Upload a source first so Epoch has material to search."
+                else:
+                    context_text = "\n\n".join(
+                        f"[Source: {item['filename']}]\n{item['text']}" for item in matches
+                    )
+                    try:
+                        answer = get_epoch_ai().answer_question(question, context_text)
+                        answer_sources = [
+                            {"filename": item["filename"], "score": round(item["score"], 3)}
+                            for item in matches
+                        ]
+                    except Exception as exc:
+                        flash(f"AI generation failed: {exc}", "error")
+
+        elif mode == "generate":
+            selected_action = request.form.get("action", "")
+            source_ids = request.form.getlist("source_ids")
+            if not source_ids:
+                source_ids = [s["id"] for s in load_epoch_sources()]
+            selected = retriever.get_chunks_for_sources(source_ids)
+            if not selected:
+                flash("Upload and select at least one source.", "error")
+            else:
+                context_text = "\n\n".join(
+                    f"[{item['filename']}]\n{item['text']}" for item in selected
+                )[:18000]
+                try:
+                    ai = get_epoch_ai()
+                    if selected_action == "summary":
+                        result, result_title = ai.summary(context_text), "Study Summary"
+                    elif selected_action == "notes":
+                        result, result_title = ai.study_notes(context_text), "Revision Notes"
+                    elif selected_action == "flashcards":
+                        result, result_title = ai.flashcards(context_text), "Generated Flashcards"
+                    elif selected_action == "questions":
+                        result, result_title = ai.practice_questions(context_text), "Practice Questions"
+                    else:
+                        flash("Choose a valid generation type.", "error")
+                except Exception as exc:
+                    flash(f"AI generation failed: {exc}", "error")
+
+    conn = db()
+    context = dashboard_context(conn)
+    conn.close()
+    context.update({
+        "page": "study",
+        "sources": load_epoch_sources(),
+        "answer": answer,
+        "answer_sources": answer_sources,
+        "result": result,
+        "result_title": result_title,
+        "selected_action": selected_action,
+        "model_name": os.getenv("EPOCH_MODEL", "google/flan-t5-base"),
+    })
+    return render_template("study_workspace.html", **context)
+
+
+@app.route("/shop/redeem-form/<int:item_id>", methods=["POST"])
+@login_required
+def redeem_reward_form(item_id):
+    conn = db()
+    item = conn.execute(
+        "SELECT * FROM shop_items WHERE id=? AND (username IS NULL OR username=?)",
+        (item_id, session["user"]),
+    ).fetchone()
+    balance = user_coins(conn, session["user"])
+
+    if not item:
+        conn.close()
+        flash("Reward not found.", "error")
+        return redirect(url_for("shopping"))
+    if balance < item["cost"]:
+        conn.close()
+        flash("Not enough coins.", "error")
+        return redirect(url_for("shopping"))
+
+    conn.execute("UPDATE users SET coins=coins-? WHERE username=?", (item["cost"], session["user"]))
+    purchase = conn.execute(
+        "INSERT INTO purchases(username,item_id,purchased_at) VALUES(?,?,?)",
+        (session["user"], item_id, dt.datetime.now().isoformat(timespec="seconds")),
+    )
+    task_id = None
+    if item["duration"] > 0:
+        target = dt.date.today()
+        deadline = dt.datetime.combine(target + dt.timedelta(days=1), dt.time(23, 59))
+        task_id = schedule_task(
+            conn, session["user"], item["name"], item["duration"], "Low", 0,
+            target, "19:00", deadline, 0, get_calendar_service(), True, item_id, REWARD_START
+        )
+    conn.execute("UPDATE purchases SET task_id=? WHERE id=?", (task_id, purchase.lastrowid))
+    conn.commit()
+    conn.close()
+    flash(f"Redeemed {item['name']}!", "success")
+    return redirect(url_for("shopping"))
+
+
+@app.route("/page/<int:tab_id>/block/add", methods=["POST"])
+@login_required
+def add_page_block(tab_id):
+    block_type = request.form.get("block_type", "paragraph")
+    content = request.form.get("content", "").strip()
+    allowed = {"heading", "subheading", "paragraph", "bullet", "todo", "callout", "quote", "code", "divider", "link"}
+    if block_type not in allowed:
+        block_type = "paragraph"
+    conn = db()
+    if conn.execute("SELECT 1 FROM user_tabs WHERE id=? AND username=?", (tab_id, session["user"])).fetchone():
+        order = conn.execute(
+            "SELECT COALESCE(MAX(block_order), -1) + 1 FROM page_blocks WHERE tab_id=? AND username=?",
+            (tab_id, session["user"]),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO page_blocks(username,tab_id,block_order,block_type,content,checked,metadata) VALUES(?,?,?,?,?,0,'')",
+            (session["user"], tab_id, order, block_type, content),
+        )
+        conn.commit()
+    conn.close()
+    return redirect(url_for("blank_page", tab_id=tab_id))
+
+
+@app.route("/page/<int:tab_id>/block/<int:block_id>/edit", methods=["POST"])
+@login_required
+def edit_page_block(tab_id, block_id):
+    content = request.form.get("content", "")
+    conn = db()
+    conn.execute(
+        "UPDATE page_blocks SET content=? WHERE id=? AND tab_id=? AND username=?",
+        (content, block_id, tab_id, session["user"]),
+    )
+    conn.commit()
+    conn.close()
+    return redirect(url_for("blank_page", tab_id=tab_id))
+
+
+@app.route("/page/<int:tab_id>/block/<int:block_id>/delete", methods=["POST"])
+@login_required
+def delete_page_block(tab_id, block_id):
+    conn = db()
+    conn.execute(
+        "DELETE FROM page_blocks WHERE id=? AND tab_id=? AND username=?",
+        (block_id, tab_id, session["user"]),
+    )
+    conn.commit()
+    conn.close()
+    return redirect(url_for("blank_page", tab_id=tab_id))
+
+
+@app.route("/page/<int:tab_id>/block/<int:block_id>/move/<direction>", methods=["POST"])
+@login_required
+def move_page_block(tab_id, block_id, direction):
+    conn = db()
+    current = conn.execute(
+        "SELECT id,block_order FROM page_blocks WHERE id=? AND tab_id=? AND username=?",
+        (block_id, tab_id, session["user"]),
+    ).fetchone()
+    if current:
+        op = "<" if direction == "up" else ">"
+        sort = "DESC" if direction == "up" else "ASC"
+        neighbour = conn.execute(
+            f"SELECT id,block_order FROM page_blocks WHERE tab_id=? AND username=? AND block_order {op} ? ORDER BY block_order {sort} LIMIT 1",
+            (tab_id, session["user"], current["block_order"]),
+        ).fetchone()
+        if neighbour:
+            conn.execute("UPDATE page_blocks SET block_order=? WHERE id=?", (neighbour["block_order"], current["id"]))
+            conn.execute("UPDATE page_blocks SET block_order=? WHERE id=?", (current["block_order"], neighbour["id"]))
+            conn.commit()
+    conn.close()
+    return redirect(url_for("blank_page", tab_id=tab_id))
 
 
 @app.route("/logout")
