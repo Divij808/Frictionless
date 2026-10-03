@@ -879,6 +879,162 @@ def health_section(section):
 
 
 
+
+# -------------------- Epoch Notebook System --------------------
+
+def notebook_owned(notebook_id):
+    conn = db()
+    row = conn.execute("SELECT * FROM notebooks WHERE id=? AND username=?", (notebook_id, session["user"])).fetchone()
+    conn.close()
+    return row
+
+def notebook_sources(notebook_id):
+    conn = db()
+    rows = conn.execute("SELECT * FROM notebook_sources WHERE username=? AND notebook_id=? ORDER BY created_at DESC", (session["user"], notebook_id)).fetchall()
+    conn.close()
+    return rows
+
+def fetch_url_text(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only HTTP and HTTPS URLs are supported.")
+    response = requests.get(url, timeout=25, headers={"User-Agent": "Epoch/1.0"})
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "")
+    if "application/pdf" in content_type or parsed.path.lower().endswith(".pdf"):
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(response.content))
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages), "pdf"
+    html = response.text
+    text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        raise ValueError("No readable text was found at that URL.")
+    return text, "web"
+
+@app.route("/study/notebooks")
+@login_required
+def study_notebooks():
+    conn = db()
+    groups = conn.execute("SELECT * FROM study_groups WHERE username=? ORDER BY name", (session["user"],)).fetchall()
+    notebooks = conn.execute("SELECT * FROM notebooks WHERE username=? ORDER BY name", (session["user"],)).fetchall()
+    conn.close()
+    return render_template("study_notebooks.html", page="study", groups=groups, notebooks=notebooks)
+
+@app.route("/study/group/create", methods=["POST"])
+@login_required
+def study_group_create():
+    name = request.form.get("name", "").strip()
+    if name:
+        conn = db()
+        conn.execute("INSERT INTO study_groups(username,name,description,icon) VALUES(?,?,?,?)", (session["user"], name, request.form.get("description","").strip(), request.form.get("icon","📚")))
+        conn.commit(); conn.close()
+    return redirect(url_for("study_notebooks"))
+
+@app.route("/study/notebook/create", methods=["POST"])
+@login_required
+def study_notebook_create():
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Enter a notebook name.", "error")
+        return redirect(url_for("study_notebooks"))
+    conn = db()
+    conn.execute("INSERT INTO notebooks(username,group_id,name,description,created_at) VALUES(?,?,?,?,?)", (session["user"], request.form.get("group_id") or None, name, request.form.get("description","").strip(), dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit(); conn.close()
+    return redirect(url_for("study_notebooks"))
+
+@app.route("/study/notebook/<int:notebook_id>")
+@login_required
+def study_notebook(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        flash("Notebook not found.", "error")
+        return redirect(url_for("study_notebooks"))
+    return render_template("study_notebook.html", page="study", notebook=notebook, sources=notebook_sources(notebook_id))
+
+@app.route("/study/notebook/<int:notebook_id>/source", methods=["POST"])
+@login_required
+def study_notebook_add_source(notebook_id):
+    if not notebook_owned(notebook_id):
+        return redirect(url_for("study_notebooks"))
+    url = request.form.get("url", "").strip()
+    if not url:
+        flash("Enter a website or PDF URL.", "error")
+        return redirect(url_for("study_notebook", notebook_id=notebook_id))
+    try:
+        text_value, source_type = fetch_url_text(url)
+        chunks = chunk_text(text_value)
+        source_id = uuid.uuid4().hex
+        title = urlparse(url).netloc or url
+        conn = db()
+        conn.execute("INSERT INTO notebook_sources(username,notebook_id,source_id,title,source_type,url,chunks,characters,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                     (session["user"], notebook_id, source_id, title, source_type, url, len(chunks), len(text_value), dt.datetime.now().isoformat(timespec="seconds")))
+        conn.commit(); conn.close()
+        data_dir, _ = epoch_user_paths()
+        Retriever(data_dir / f"notebook_{notebook_id}.json").add_document(source_id, title, chunks)
+        flash("Website/PDF fetched and indexed.", "success")
+    except Exception as exc:
+        flash(f"Could not fetch source: {exc}", "error")
+    return redirect(url_for("study_notebook", notebook_id=notebook_id))
+
+@app.route("/study/notebook/<int:notebook_id>/cards", methods=["GET","POST"])
+@login_required
+def study_cards(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        return redirect(url_for("study_notebooks"))
+    conn = db()
+    if request.method == "POST":
+        front = request.form.get("front", "").strip()
+        back = request.form.get("back", "").strip()
+        if front and back:
+            conn.execute("INSERT INTO study_cards(username,notebook_id,front,back,due_at) VALUES(?,?,?,?,?)", (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds")))
+            conn.commit()
+    cards = conn.execute("SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at", (session["user"], notebook_id)).fetchall()
+    conn.close()
+    return render_template("study_cards.html", page="study", notebook=notebook, cards=cards)
+
+@app.route("/study/notebook/<int:notebook_id>/cards/<int:card_id>/review", methods=["POST"])
+@login_required
+def study_card_review(notebook_id, card_id):
+    rating = request.form.get("rating", "again")
+    conn = db()
+    card = conn.execute("SELECT * FROM study_cards WHERE id=? AND username=? AND notebook_id=?", (card_id, session["user"], notebook_id)).fetchone()
+    if card:
+        if rating == "again":
+            interval, ease = 0, max(1.3, card["ease"] - 0.2)
+        elif rating == "hard":
+            interval, ease = max(1, round(max(1, card["interval_days"]) * 1.2)), max(1.3, card["ease"] - 0.15)
+        else:
+            interval, ease = (1 if card["interval_days"] == 0 else round(card["interval_days"] * card["ease"])), min(3.0, card["ease"] + 0.1)
+        due = (dt.datetime.now() + dt.timedelta(days=interval)).isoformat(timespec="seconds")
+        conn.execute("UPDATE study_cards SET interval_days=?,ease=?,due_at=?,reps=reps+1 WHERE id=?", (interval, ease, due, card_id))
+        conn.commit()
+    conn.close()
+    return redirect(url_for("study_cards", notebook_id=notebook_id))
+
+@app.route("/study/notebook/<int:notebook_id>/quiz")
+@login_required
+def study_quiz(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        return redirect(url_for("study_notebooks"))
+    conn = db()
+    cards = conn.execute("SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at LIMIT 20", (session["user"], notebook_id)).fetchall()
+    conn.close()
+    return render_template("study_quiz.html", page="study", notebook=notebook, cards=cards)
+
+@app.route("/study/notebook/<int:notebook_id>/pdf/<int:source_id>")
+@login_required
+def study_pdf_viewer(notebook_id, source_id):
+    conn = db()
+    source = conn.execute("SELECT * FROM notebook_sources WHERE id=? AND username=? AND notebook_id=?", (source_id, session["user"], notebook_id)).fetchone()
+    conn.close()
+    if not source or source["source_type"] != "pdf":
+        return "PDF source not found", 404
+    return render_template("study_pdf.html", page="study", source=source, notebook=notebook_owned(notebook_id))
+
 # -------------------- Study Hub / Epoch --------------------
 
 BASE_DIR = Path(__file__).resolve().parent
