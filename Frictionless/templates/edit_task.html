@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Edit Task · Frictionless{% endblock %}{% block content %}
+<div class="topbar"><div><h1>Edit Task</h1><p>Change the task using a normal server-side form.</p></div></div>
+<section class="card"><form method="post" class="grid grid-2">
+<label>Name<input name="name" value="{{task.name}}" required></label>
+<label>Duration (minutes)<input name="duration" type="number" min="5" value="{{duration}}" required></label>
+<label>Priority<select name="priority">{%for p in ['High','Medium','Low']%}<option {%if task.priority==p%}selected{%endif%}>{{p}}</option>{%endfor%}</select></label>
+<label>Target date<input name="task_date" type="date" value="{{task.task_date}}" required></label>
+<label>Deadline<input name="deadline" type="datetime-local" value="{{task.deadline.replace(' ','T')[:16] if task.deadline else ''}}"></label>
+<div class="actions"><button class="btn">Save Changes</button><a class="btn secondary" href="{{url_for('dashboard')}}">Cancel</a></div>
+</form></section>{% endblock %}
