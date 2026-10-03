@@ -1,5 +1,8 @@
-{% extends "base.html" %}{% block title %}Study Hub · Frictionless{% endblock %}{% block content %}
+{% extends "base.html" %}{% block title %}Study Hub · Epoch{% endblock %}{% block content %}
 <div class="topbar"><div><h1>📚 Study Hub</h1><p>Epoch uses your uploaded revision sources to answer questions and generate study material.</p></div></div>
-<div class="hero-grid"><a class="hero-card" href="{{url_for('study_sources')}}">📄<h3>Sources</h3><p>Upload PDF/TXT material and build a searchable index.</p></a><a class="hero-card" href="{{url_for('study_workspace')}}">🧠<h3>Workspace</h3><p>Ask questions or generate summaries, notes, flashcards and practice questions.</p></a></div>
+<div class="hero-grid study-actions">
+<a class="hero-card study-action" href="{{ url_for('study_sources') }}" role="button"><span class="study-action-icon">📄</span><h3>Sources</h3><p>Upload PDF/TXT material and build a searchable index.</p><span class="btn">Open Sources</span></a>
+<a class="hero-card study-action" href="{{ url_for('study_workspace') }}" role="button"><span class="study-action-icon">🧠</span><h3>Workspace</h3><p>Ask questions or generate summaries, notes, flashcards and practice questions.</p><span class="btn">Open Workspace</span></a>
+</div>
 <div class="notice">The AI model is loaded only when the Workspace is first used.</div>
 {% endblock %}
