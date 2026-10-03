@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Notebooks · Epoch{% endblock %}{% block content %}
+<div class="topbar"><div><h1>📚 Notebooks</h1><p>Organise your learning into subjects, groups and modules.</p></div></div>
+<div class="grid grid-2">
+<section class="card"><h2>Create a Group</h2><form method="post" action="{{ url_for('study_group_create') }}" class="stack"><input name="name" placeholder="e.g. Computer Science" required><input name="icon" value="💻" maxlength="2"><input name="description" placeholder="Subject description"><button class="btn">Create Group</button></form></section>
+<section class="card"><h2>Create a Notebook</h2><form method="post" action="{{ url_for('study_notebook_create') }}" class="stack"><input name="name" placeholder="e.g. Algorithms" required><select name="group_id"><option value="">No group</option>{% for g in groups %}<option value="{{g.id}}">{{g.icon}} {{g.name}}</option>{% endfor %}</select><input name="description" placeholder="Module description"><button class="btn">Create Notebook</button></form></section>
+</div>
+<section class="card"><h2>Your Notebooks</h2><div class="grid grid-3">{% for n in notebooks %}<a class="hero-card" href="{{url_for('study_notebook',notebook_id=n.id)}}"><h3>📓 {{n.name}}</h3><p>{{n.description or 'Open notebook'}}</p></a>{% else %}<div class="notice">Create your first notebook.</div>{% endfor %}</div></section>
+{% endblock %}
