@@ -6,7 +6,7 @@ The `combined-python-app` branch contains Epoch, combining the original producti
 
 The application remains one Flask application and one Python backend.
 
-## 1. Choose Frictionless as the base
+## 1. Choose Epoch as the base
 
 The original application application was used as the technical base because it already contained the main authentication, SQLite database, tasks, habits, goals, health, rewards, loans, quick links and custom pages.
 
@@ -88,7 +88,7 @@ This prevents one logged-in user from accidentally searching another user's Stud
 
 ## 7. Install dependencies
 
-From the `Frictionless` directory:
+From the `Epoch` directory:
 
 ```bash
 pip install -r requirements.txt
@@ -100,11 +100,11 @@ The additional Study Hub dependencies include:
 - `transformers`
 - `torch`
 
-The existing Frictionless Google Calendar dependencies remain listed as well.
+The existing Epoch Google Calendar dependencies remain listed as well.
 
 ## 8. Run the application
 
-From the `Frictionless` directory:
+From the `Epoch` directory:
 
 ```bash
 python app.py
@@ -124,7 +124,7 @@ Test in this order:
 - Log out.
 - Confirm Study Hub redirects unauthenticated users to login.
 
-### Original Frictionless features
+### Original Epoch features
 - Create a task.
 - Complete a task and check coins.
 - Create a habit.
