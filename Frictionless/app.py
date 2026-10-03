@@ -1035,6 +1035,39 @@ def study_pdf_viewer(notebook_id, source_id):
         return "PDF source not found", 404
     return render_template("study_pdf.html", page="study", source=source, notebook=notebook_owned(notebook_id))
 
+
+@app.route("/study/notebook/<int:notebook_id>/analysis", methods=["GET","POST"])
+@login_required
+def study_analysis(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        return redirect(url_for("study_notebooks"))
+    analysis = None
+    if request.method == "POST":
+        uploaded = request.files.get("file")
+        if not uploaded or not uploaded.filename.lower().endswith(".csv"):
+            flash("Upload a CSV file for data analysis.", "error")
+        else:
+            try:
+                rows = list(csv.DictReader(io.StringIO(uploaded.read().decode("utf-8", errors="ignore"))))
+                if not rows:
+                    raise ValueError("The CSV contains no data rows.")
+                columns = list(rows[0].keys())
+                numeric = {}
+                for col in columns:
+                    values=[]
+                    for row in rows:
+                        try:
+                            values.append(float(row[col]))
+                        except (ValueError, TypeError):
+                            pass
+                    if values:
+                        numeric[col]={"count":len(values),"mean":round(statistics.mean(values),4),"min":min(values),"max":max(values),"median":statistics.median(values)}
+                analysis={"rows":len(rows),"columns":columns,"numeric":numeric}
+            except Exception as exc:
+                flash(f"Analysis failed: {exc}", "error")
+    return render_template("study_analysis.html", page="study", notebook=notebook, analysis=analysis)
+
 # -------------------- Study Hub / Epoch --------------------
 
 BASE_DIR = Path(__file__).resolve().parent
