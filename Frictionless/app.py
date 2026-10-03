@@ -1185,7 +1185,7 @@ def study_workspace():
             if not question:
                 flash("Enter a question.", "error")
             else:
-                matches = retriever.search(question, top_k=5)
+                matches = retriever.search(question, top_k=12)
                 if not matches:
                     answer = "Upload a source first so Epoch has material to search."
                 else:
