@@ -1,5 +1,7 @@
 import os
 import re
+
+import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
@@ -7,18 +9,44 @@ class LocalAI:
 
   def __init__(self):
     self.model_name = os.getenv("EPOCH_MODEL", "google/flan-t5-base")
+    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    print(f"Loading local AI model ({self.model_name})...")
+    print(
+        f"Loading local AI model ({self.model_name}) on {self.device}..."
+    )
+
     self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-    self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+
+    # Load directly onto normal CPU/GPU memory. In particular, do not use
+    # device_map/low_cpu_mem_usage here because they can leave model weights
+    # on PyTorch's special "meta" device in some Transformers/PyTorch setups.
+    self.model = AutoModelForSeq2SeqLM.from_pretrained(
+        self.model_name,
+        device_map=None,
+        low_cpu_mem_usage=False,
+    )
+    self.model.to(self.device)
+    self.model.eval()
+
+    # Fail early with a useful message rather than producing the much less
+    # helpful "Tensor.item() cannot be called on meta tensors" during generate().
+    if any(parameter.device.type == "meta" for parameter in self.model.parameters()):
+      raise RuntimeError(
+          "The local AI model was loaded on the PyTorch meta device. "
+          "Please reinstall compatible PyTorch/Transformers versions and restart Epoch."
+      )
 
   def _generate(self, prompt, max_new_tokens=350):
     inputs = self.tokenizer(
         prompt, return_tensors="pt", max_length=512, truncation=True
     )
-    outputs = self.model.generate(
-        **inputs, max_new_tokens=max_new_tokens, do_sample=False
-    )
+    inputs = {name: value.to(self.device) for name, value in inputs.items()}
+
+    with torch.no_grad():
+      outputs = self.model.generate(
+          **inputs, max_new_tokens=max_new_tokens, do_sample=False
+      )
+
     return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
   def answer_question(self, question, context):
@@ -83,7 +111,7 @@ Revision notes:
     # Process up to 6 chunks to build a rich card deck safely
     for chunk in chunks[:6]:
       prompt = f"""
-Create a study flashcard from this text. 
+Create a study flashcard from this text.
 Format it like this:
 QUESTION: [Your question here]
 ANSWER: [Your answer here]
