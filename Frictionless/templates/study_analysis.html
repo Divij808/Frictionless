@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Data Analysis · Epoch{% endblock %}{% block content %}
+<div class="topbar"><div><h1>📊 Data Analysis</h1><p>Upload a CSV and Epoch will calculate useful descriptive statistics.</p></div><a class="btn secondary" href="{{url_for('study_notebook',notebook_id=notebook.id)}}">Back</a></div>
+<section class="card"><form method="post" enctype="multipart/form-data" class="actions"><input type="file" name="file" accept=".csv" required><button class="btn">Analyse CSV</button></form></section>
+{% if analysis %}<section class="card"><h2>Overview</h2><p>{{analysis.rows}} rows · {{analysis.columns|length}} columns</p><div class="grid grid-3">{% for name,stats in analysis.numeric.items() %}<div class="card"><h3>{{name}}</h3><p>Mean: {{stats.mean}}</p><p>Median: {{stats.median}}</p><p>Min: {{stats.min}}</p><p>Max: {{stats.max}}</p><p>Values: {{stats.count}}</p></div>{% endfor %}</div></section>{% endif %}
+{% endblock %}
