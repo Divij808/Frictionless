@@ -23,7 +23,7 @@ except ImportError:
     Request = Credentials = InstalledAppFlow = build = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FRICTIONLESS_SECRET_KEY", "super_secret_frictionless_key")
+app.secret_key = os.environ.get("EPOCH_SECRET_KEY", "super_secret_epoch_key")
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -34,7 +34,7 @@ COINS_PER_COMPLETION = 10
 
 
 def db():
-    conn = sqlite3.connect("frictionles.db")
+    conn = sqlite3.connect("epoch.db")
     conn.row_factory = sqlite3.Row
     return conn
 
