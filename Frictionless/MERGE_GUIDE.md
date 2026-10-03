@@ -1,14 +1,14 @@
-# Frictionless + test — Merge Guide
+# Epoch — Merge Guide
 
 ## Result
 
-The `combined-python-app` branch combines the original Frictionless productivity application with the Study Hub/document/RAG/AI features from `Divij808/test`.
+The `combined-python-app` branch contains Epoch, combining the original productivity application with the Study Hub/document/RAG/AI features from `Divij808/test`.
 
 The application remains one Flask application and one Python backend.
 
 ## 1. Choose Frictionless as the base
 
-Frictionless was used as the base because it already contained the main authentication, SQLite database, tasks, habits, goals, health, rewards, loans, quick links and custom pages.
+The original application application was used as the technical base because it already contained the main authentication, SQLite database, tasks, habits, goals, health, rewards, loans, quick links and custom pages.
 
 The separate `test` Flask app was not copied as a second application. Its useful modules were moved into the existing Flask application instead.
 
@@ -21,11 +21,11 @@ These modules were copied from `test`:
 - `rag/retriever.py` — stores chunks and performs simple keyword-based retrieval.
 - `ai/generator.py` — loads the local Hugging Face model and generates answers, summaries, notes, flashcards and practice questions.
 
-The packages now live directly inside the Frictionless project.
+The packages now live directly inside the Epoch project.
 
 ## 3. Add the Study Hub routes
 
-The second Flask application's routes were rewritten into the existing `Frictionless/app.py`.
+The second Flask application's routes were rewritten into the existing `app.py`.
 
 The new routes are:
 
@@ -35,11 +35,11 @@ The new routes are:
 - `/study/delete/<source_id>` — delete a source.
 - `/study/workspace` — questions and AI generation.
 
-Each route uses the existing Frictionless login system, so a user must be logged in before accessing Study Hub.
+Each route uses the existing Epoch login system, so a user must be logged in before accessing Study Hub.
 
 ## 4. Separate the HTML pages
 
-The original Frictionless monolithic `dashboard.html` was removed.
+The original application monolithic `dashboard.html` was removed.
 
 The application now uses separate templates for the major pages:
 
@@ -75,7 +75,7 @@ Study Hub now uses ordinary Flask forms:
 
 For example, uploading a source uses a normal multipart POST to `/study/upload`, rather than JavaScript/fetch.
 
-The old monolithic Frictionless dashboard was also removed from the rendering path.
+The old monolithic dashboard was also removed from the rendering path.
 
 ## 6. Keep Study Hub data separate per user
 
@@ -161,7 +161,7 @@ You can change it with the `EPOCH_MODEL` environment variable.
 The final structure is conceptually:
 
 ```text
-Frictionless/
+Epoch/
 ├── app.py
 ├── requirements.txt
 ├── ai/
