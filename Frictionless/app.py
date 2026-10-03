@@ -9,6 +9,10 @@ import uuid
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.security import generate_password_hash, check_password_hash
+from document.reader import extract_text
+from document.chunker import chunk_text
+from ai.generator import LocalAI
+from rag.retriever import Retriever
 
 try:
     from google.auth.transport.requests import Request
