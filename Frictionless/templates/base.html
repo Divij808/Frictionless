@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Frictionless{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand">⚡ Frictionless</div>
+  {% if session.get('user') %}
+  <div class="nav-title">Main</div>
+  <nav class="nav">
+    <a href="{{url_for('main_menu')}}" class="{%if page=='main'%}active{%endif%}">🏠 Main Menu</a>
+    <a href="{{url_for('dashboard')}}" class="{%if page=='dashboard'%}active{%endif%}">📅 Tasks & Schedule</a>
+    <a href="{{url_for('habits')}}" class="{%if page=='habits'%}active{%endif%}">🔥 Habits</a>
+    <a href="{{url_for('quick_links')}}" class="{%if page=='quick'%}active{%endif%}">🔗 Quick Links</a>
+    <a href="{{url_for('shopping')}}" class="{%if page=='shopping'%}active{%endif%}">🛍️ Shopping</a>
+    <a href="{{url_for('loans')}}" class="{%if page=='loans'%}active{%endif%}">💷 Loans</a>
+    <a href="{{url_for('goals')}}" class="{%if page=='goals'%}active{%endif%}">🎯 Progress</a>
+    <a href="{{url_for('health_section',section='body')}}" class="{%if page=='health'%}active{%endif%}">❤️ Health</a>
+    <a href="{{url_for('study_home')}}" class="{%if page=='study'%}active{%endif%}">📚 Study Hub</a>
+  </nav>
+  <div class="nav-title">My Pages</div>
+  <nav class="nav">
+  {% for tab in tabs|default([]) %}
+    <a href="{{url_for('blank_page',tab_id=tab.id)}}" class="{%if page_tab is defined and page_tab.id==tab.id%}active{%endif%}">{{tab.icon or '📄'}} {{tab.name}}</a>
+  {% endfor %}
+  </nav>
+  <form method="post" action="{{url_for('add_tab')}}" class="new-page">
+    <input name="tab_name" placeholder="New page" required><input name="tab_icon" value="📄" maxlength="2">
+    <button class="btn small">＋ New Page</button>
+  </form>
+  <div class="sidebar-bottom">Signed in as <strong>{{session.get('user')}}</strong><a href="{{url_for('logout')}}">Log out</a></div>
+  {% endif %}
+</aside>
+<main class="content"><div class="wrap">
+{% with messages=get_flashed_messages(with_categories=true) %}
+{% for category,message in messages %}<div class="flash {{category}}">{{message}}</div>{% endfor %}
+{% endwith %}
+{% block content %}{% endblock %}
+</div></main>
+</div>
+</body>
+</html>
