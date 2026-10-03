@@ -898,6 +898,16 @@ def fetch_url_text(url):
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only HTTP and HTTPS URLs are supported.")
+    if "youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc:
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            video_id = parse_qs(parsed.query).get("v", [None])[0] or parsed.path.strip("/")
+            transcript = YouTubeTranscriptApi().fetch(video_id)
+            text_value = " ".join(snippet.text for snippet in transcript)
+            if text_value.strip():
+                return text_value, "youtube"
+        except Exception as exc:
+            raise ValueError(f"YouTube transcript could not be fetched: {exc}") from exc
     response = requests.get(url, timeout=25, headers={"User-Agent": "Epoch/1.0"})
     response.raise_for_status()
     content_type = response.headers.get("content-type", "")
