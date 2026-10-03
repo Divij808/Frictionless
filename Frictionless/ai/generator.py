@@ -38,7 +38,7 @@ class LocalAI:
 
   def _generate(self, prompt, max_new_tokens=350):
     inputs = self.tokenizer(
-        prompt, return_tensors="pt", max_length=512, truncation=True
+        prompt, return_tensors="pt", max_length=2048, truncation=True
     )
     inputs = {name: value.to(self.device) for name, value in inputs.items()}
 
@@ -50,9 +50,9 @@ class LocalAI:
     return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
   def answer_question(self, question, context):
-    """Answers queries by hunting for accurate explanations and definitions."""
+    """Answers across the supplied evidence, including multi-part comparisons."""
     prompt = f"""
-Read the text below and answer the question accurately. If the text defines the term or concept, provide that definition clearly.
+Read ALL relevant parts of the text below before answering. If the question compares multiple concepts, address EVERY concept explicitly and compare them. Do not stop after answering the first part.
 
 Context:
 {context}

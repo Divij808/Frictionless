@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block title %}Quiz · {{notebook.name}}{% endblock %}{% block content %}
+<div class="topbar"><div><h1>📝 Self Quiz</h1><p>Answer from memory before revealing the answers.</p></div><a class="btn secondary" href="{{url_for('study_cards',notebook_id=notebook.id)}}">Flashcards</a></div>
+{% for c in cards %}<section class="card"><h3>{{loop.index}}. {{c.front}}</h3><details><summary>Reveal answer</summary><p>{{c.back}}</p></details></section>{% else %}<div class="notice">Create flashcards first to build a quiz.</div>{% endfor %}
+{% endblock %}

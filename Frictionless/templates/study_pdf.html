@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block title %}PDF Viewer · Epoch{% endblock %}{% block content %}
+<div class="topbar"><div><h1>📄 {{source.title}}</h1><p>Read the document inside Epoch.</p></div><a class="btn secondary" href="{{url_for('study_notebook',notebook_id=notebook.id)}}">Back</a></div>
+<section class="card pdf-viewer"><iframe src="{{source.url}}" title="PDF viewer"></iframe></section>
+{% endblock %}

@@ -1,8 +1,9 @@
 {% extends "base.html" %}{% block title %}Study Hub · Epoch{% endblock %}{% block content %}
-<div class="topbar"><div><h1>📚 Study Hub</h1><p>Epoch uses your uploaded revision sources to answer questions and generate study material.</p></div></div>
+<div class="topbar"><div><h1>📚 Study Hub</h1><p>Your NotebookLM-style learning workspace: sources, notebooks, AI, active recall and quizzes.</p></div><a class="btn" href="{{url_for('study_notebooks')}}">📓 Notebooks</a></div>
 <div class="hero-grid study-actions">
-<a class="hero-card study-action" href="{{ url_for('study_sources') }}" role="button"><span class="study-action-icon">📄</span><h3>Sources</h3><p>Upload PDF/TXT material and build a searchable index.</p><span class="btn">Open Sources</span></a>
-<a class="hero-card study-action" href="{{ url_for('study_workspace') }}" role="button"><span class="study-action-icon">🧠</span><h3>Workspace</h3><p>Ask questions or generate summaries, notes, flashcards and practice questions.</p><span class="btn">Open Workspace</span></a>
+<a class="hero-card study-action" href="{{url_for('study_notebooks')}}"><span class="study-action-icon">📓</span><h3>Notebooks & Groups</h3><p>Organise subjects such as Computer Science → Algorithms → Sorting.</p><span class="btn">Open Notebooks</span></a>
+<a class="hero-card study-action" href="{{url_for('study_sources')}}"><span class="study-action-icon">📄</span><h3>Quick Sources</h3><p>Upload PDFs/TXT files and build a searchable index.</p><span class="btn">Open Sources</span></a>
+<a class="hero-card study-action" href="{{url_for('study_workspace')}}"><span class="study-action-icon">🧠</span><h3>AI Workspace</h3><p>Ask questions, summaries, notes, flashcards and practice questions.</p><span class="btn">Open Workspace</span></a>
 </div>
-<div class="notice">The AI model is loaded only when the Workspace is first used.</div>
+<div class="notice">For best results, keep related material in the same notebook. Epoch can combine multiple sources instead of relying on one retrieved chunk.</div>
 {% endblock %}
