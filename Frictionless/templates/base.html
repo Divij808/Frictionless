@@ -42,5 +42,77 @@
 {% block content %}{% endblock %}
 </div></main>
 </div>
+{% if session.get('user') %}
+<button class="epoch-assistant-launcher" id="epochAssistantLauncher" aria-label="Open Epoch AI Assistant">✦</button>
+<section class="epoch-assistant" id="epochAssistant" aria-label="Epoch AI Assistant">
+  <header class="epoch-assistant-header">
+    <div><strong>Epoch Assistant</strong><span>Ask me to use the application</span></div>
+    <button type="button" class="epoch-assistant-close" id="epochAssistantClose">×</button>
+  </header>
+  <div class="epoch-assistant-body" id="epochAssistantBody"></div>
+  <div class="epoch-assistant-suggestions" id="epochAssistantSuggestions"></div>
+  <form class="epoch-assistant-form" id="epochAssistantForm">
+    <textarea id="epochAssistantInput" rows="2" placeholder="Try: Add a task to revise maths tomorrow at 5pm for 1 hour"></textarea>
+    <div><span>AI can create tasks, check your schedule and explain Epoch.</span><button class="btn small" type="submit">Send</button></div>
+  </form>
+</section>
+<script>
+(function(){
+  const launcher=document.getElementById("epochAssistantLauncher");
+  const panel=document.getElementById("epochAssistant");
+  const close=document.getElementById("epochAssistantClose");
+  const body=document.getElementById("epochAssistantBody");
+  const suggestions=document.getElementById("epochAssistantSuggestions");
+  const form=document.getElementById("epochAssistantForm");
+  const input=document.getElementById("epochAssistantInput");
+  if(!launcher) return;
+  const escapeHtml=value=>String(value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
+  const addMessage=(role,text,id)=>{
+    const item=document.createElement("div");
+    item.className="epoch-assistant-message "+(role==="user"?"user":"ai");
+    item.innerHTML="<div>"+escapeHtml(text).replace(/\n/g,"<br>")+"</div>";
+    if(role==="ai" && id){
+      const feedback=document.createElement("div");
+      feedback.className="epoch-assistant-feedback";
+      feedback.innerHTML="<button data-id='"+id+"' data-helpful='1'>👍</button><button data-id='"+id+"' data-helpful='0'>👎</button>";
+      item.appendChild(feedback);
+    }
+    body.appendChild(item);
+    body.scrollTop=body.scrollHeight;
+  };
+  const open=()=>{panel.classList.add("open");input.focus();};
+  launcher.onclick=open; close.onclick=()=>panel.classList.remove("open");
+  async function load(){
+    const response=await fetch("{{url_for('assistant_history')}}");
+    const data=await response.json();
+    body.innerHTML="";
+    if(!data.messages.length){
+      addMessage("ai","Hi! I'm Epoch Assistant. I'm new to this application, so start by telling me what you want to do. I can learn which commands work and help you use the app. Try one of the examples below.");
+      if(data.first_use) open();
+    } else {
+      data.messages.forEach(m=>addMessage("user",m.question)||addMessage("ai",m.answer,m.id));
+    }
+    suggestions.innerHTML="";
+    data.suggestions.forEach(s=>{const b=document.createElement("button");b.type="button";b.textContent=s;b.onclick=()=>{input.value=s;input.focus();};suggestions.appendChild(b);});
+  }
+  form.addEventListener("submit",async e=>{
+    e.preventDefault(); const message=input.value.trim(); if(!message)return;
+    addMessage("user",message); input.value="";
+    const thinking=document.createElement("div"); thinking.className="epoch-assistant-message ai"; thinking.innerHTML="<div>Thinking…</div>"; body.appendChild(thinking); body.scrollTop=body.scrollHeight;
+    try{
+      const response=await fetch("{{url_for('assistant_chat')}}",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})});
+      const data=await response.json(); thinking.remove();
+      addMessage("ai",data.answer||data.error||"I could not answer that.",data.id);
+    }catch(err){thinking.remove();addMessage("ai","I could not reach the assistant.");}
+  });
+  body.addEventListener("click",async e=>{
+    const button=e.target.closest("button[data-id]"); if(!button)return;
+    await fetch("{{url_for('assistant_feedback')}}",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message_id:Number(button.dataset.id),helpful:button.dataset.helpful==="1"})});
+    button.parentElement.innerHTML="<span>Thanks — I'll use that feedback.</span>";
+  });
+  load();
+})();
+</script>
+{% endif %}
 </body>
 </html>
