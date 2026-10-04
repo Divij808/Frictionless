@@ -1480,7 +1480,7 @@ def study_notebook_workspace(notebook_id):
                 try:
                     memory = study_chat_memory(session["user"], notebook_id, question)
                     memory_text = "\n\n".join("Previous helpful question: " + item["question"] + "\nPrevious answer: " + item["answer"] for item in memory)
-                    answer = get_epoch_ai().answer_question(question, context_text, memory_text)
+                    answer = get_epoch_ai().answer_question(question, context_text + "\n\nPrevious helpful conversations (use only as optional guidance):\n" + memory_text)
                     answer_sources = [
                         {
                             "filename": source_map.get(item["source_id"], item["filename"]),
