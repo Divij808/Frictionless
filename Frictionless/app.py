@@ -931,6 +931,44 @@ def fetch_url_text(url):
 
 @app.route("/study/notebooks")
 @login_required
+STUDY_BADGES = [
+    {"id":"first-source","icon":"📖","name":"First Source","description":"Add your first study source.","type":"sources","target":1},
+    {"id":"researcher","icon":"🔎","name":"Researcher","description":"Add 5 study sources.","type":"sources","target":5},
+    {"id":"notebook-builder","icon":"📓","name":"Notebook Builder","description":"Create your first notebook.","type":"notebooks","target":1},
+    {"id":"question-asker","icon":"💬","name":"Question Asker","description":"Ask your first StudyChat question.","type":"questions","target":1},
+    {"id":"curious-mind","icon":"🧠","name":"Curious Mind","description":"Ask 10 StudyChat questions.","type":"questions","target":10},
+    {"id":"card-maker","icon":"🃏","name":"Card Maker","description":"Create your first flashcard.","type":"cards","target":1},
+    {"id":"active-recall","icon":"⚡","name":"Active Recall","description":"Review 10 flashcards.","type":"reviews","target":10},
+    {"id":"study-machine","icon":"🏆","name":"Study Machine","description":"Review 50 flashcards.","type":"reviews","target":50},
+]
+
+def study_activity(username, activity_type):
+    conn = db()
+    conn.execute("INSERT INTO study_activity(username,activity_type,created_at) VALUES(?,?,?)", (username, activity_type, dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
+
+def get_study_achievements(username):
+    conn = db()
+    counts = {
+        "sources": conn.execute("SELECT COUNT(*) FROM notebook_sources WHERE username=?", (username,)).fetchone()[0],
+        "notebooks": conn.execute("SELECT COUNT(*) FROM notebooks WHERE username=?", (username,)).fetchone()[0],
+        "questions": conn.execute("SELECT COUNT(*) FROM study_activity WHERE username=? AND activity_type='question'", (username,)).fetchone()[0],
+        "cards": conn.execute("SELECT COUNT(*) FROM study_cards WHERE username=?", (username,)).fetchone()[0],
+        "reviews": conn.execute("SELECT COALESCE(SUM(reps),0) FROM study_cards WHERE username=?", (username,)).fetchone()[0],
+    }
+    for badge in STUDY_BADGES:
+        if counts.get(badge["type"], 0) >= badge["target"]:
+            conn.execute("INSERT OR IGNORE INTO study_achievements(username,badge_id,earned_at) VALUES(?,?,?)", (username, badge["id"], dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    earned_ids = {row["badge_id"] for row in conn.execute("SELECT badge_id FROM study_achievements WHERE username=?", (username,)).fetchall()}
+    conn.close()
+    badges = []
+    for badge in STUDY_BADGES:
+        current = counts.get(badge["type"], 0)
+        badges.append({**badge, "current": min(current, badge["target"]), "earned": badge["id"] in earned_ids, "progress": min(100, int(current / badge["target"] * 100))})
+    return badges, sum(1 for badge in badges if badge["earned"])
+
 def study_notebooks():
     conn = db()
     groups = conn.execute("SELECT * FROM study_groups WHERE username=? ORDER BY name", (session["user"],)).fetchall()
@@ -946,6 +984,7 @@ def study_group_create():
         conn = db()
         conn.execute("INSERT INTO study_groups(username,name,description,icon) VALUES(?,?,?,?)", (session["user"], name, request.form.get("description","").strip(), request.form.get("icon","📚")))
         conn.commit(); conn.close()
+    study_activity(session["user"], "notebook")
     return redirect(url_for("study_notebooks"))
 
 @app.route("/study/notebook/create", methods=["POST"])
@@ -987,6 +1026,7 @@ def study_notebook_add_source(notebook_id):
         conn.execute("INSERT INTO notebook_sources(username,notebook_id,source_id,title,source_type,url,chunks,characters,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
                      (session["user"], notebook_id, source_id, title, source_type, url, len(chunks), len(text_value), dt.datetime.now().isoformat(timespec="seconds")))
         conn.commit(); conn.close()
+        study_activity(session["user"], "source")
         data_dir, _ = epoch_user_paths()
         Retriever(data_dir / f"notebook_{notebook_id}.json").add_document(source_id, title, chunks)
         flash("Website/PDF fetched and indexed.", "success")
@@ -1007,6 +1047,7 @@ def study_cards(notebook_id):
         if front and back:
             conn.execute("INSERT INTO study_cards(username,notebook_id,front,back,due_at) VALUES(?,?,?,?,?)", (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds")))
             conn.commit()
+            study_activity(session["user"], "card")
     cards = conn.execute("SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at", (session["user"], notebook_id)).fetchall()
     conn.close()
     return render_template("study_cards.html", page="study", notebook=notebook, cards=cards)
@@ -1027,6 +1068,7 @@ def study_card_review(notebook_id, card_id):
         due = (dt.datetime.now() + dt.timedelta(days=interval)).isoformat(timespec="seconds")
         conn.execute("UPDATE study_cards SET interval_days=?,ease=?,due_at=?,reps=reps+1 WHERE id=?", (interval, ease, due, card_id))
         conn.commit()
+        study_activity(session["user"], "review")
     conn.close()
     return redirect(url_for("study_cards", notebook_id=notebook_id))
 
@@ -1142,7 +1184,15 @@ def study_home():
     conn = db()
     context = dashboard_context(conn)
     conn.close()
+    badges, badge_count = get_study_achievements(session["user"])
+    context.update({"badges": badges, "badge_count": badge_count})
     return render_template("study_home.html", page="study", **context)
+
+@app.route("/study/achievements")
+@login_required
+def study_achievements():
+    badges, badge_count = get_study_achievements(session["user"])
+    return render_template("study_achievements.html", page="study", badges=badges, badge_count=badge_count)
 
 
 @app.route("/study/sources")
@@ -1232,6 +1282,8 @@ def study_workspace():
 
         if mode == "ask":
             question = request.form.get("question", "").strip()
+            if question:
+                study_activity(session["user"], "question")
             if not question:
                 flash("Enter a question.", "error")
             else:
