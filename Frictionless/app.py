@@ -1266,7 +1266,7 @@ def study_workspace():
     retriever = epoch_retriever()
 
     if request.method == "POST":
-        mode = request.form.get("mode", "")
+        mode = request.form.get("mode", "ask")
 
         if mode == "ask":
             question = request.form.get("question", "").strip()
