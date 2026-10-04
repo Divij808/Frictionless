@@ -1138,19 +1138,19 @@ def study_cards(notebook_id):
             )
             conn.commit()
 
-            if exam_deadline:
+            if calendar_enabled:
                 try:
                     card = conn.execute(
                         "SELECT * FROM study_cards WHERE id=?", (cur.lastrowid,)
                     ).fetchone()
-                    first_review = min(
-                        exam_deadline,
-                        dt.datetime.now().replace(second=0, microsecond=0) + dt.timedelta(days=1)
-                    )
-                    if first_review.date() == dt.datetime.now().date() and exam_deadline.date() != dt.datetime.now().date():
-                        first_review = dt.datetime.combine(
-                            dt.datetime.now().date() + dt.timedelta(days=1), dt.time(18, 0)
-                        )
+                    now = dt.datetime.now().replace(second=0, microsecond=0)
+                    first_review = now + dt.timedelta(days=1)
+                    if exam_deadline:
+                        first_review = min(exam_deadline, first_review)
+                        if first_review.date() == now.date() and exam_deadline.date() != now.date():
+                            first_review = dt.datetime.combine(
+                                now.date() + dt.timedelta(days=1), dt.time(18, 0)
+                            )
                     schedule_flashcard_calendar_review(
                         conn, card, first_review, notebook["name"],
                         exam_deadline=exam_deadline if is_exam else None
@@ -1163,10 +1163,7 @@ def study_cards(notebook_id):
                 except Exception as exc:
                     flash(f"Flashcard added, but the calendar review was not scheduled: {exc}", "error")
             else:
-                if calendar_enabled:
-                    flash("Flashcard added. Calendar scheduling is enabled; future reviews will be rescheduled automatically.", "success")
-                else:
-                    flash("Flashcard added. No calendar scheduling was requested.", "success")
+                flash("Flashcard added. No calendar scheduling was requested.", "success")
             conn.commit()
 
     cards = conn.execute(
