@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Achievements · Epoch{% endblock %}
+{% block content %}
+<div class="topbar"><div><h1>🏆 Study Achievements</h1><p>Complete study activities to unlock badges.</p></div><a class="btn secondary" href="{{url_for('study_home')}}">← Study Hub</a></div>
+<section class="card"><div class="achievement-summary"><strong>{{badge_count}} / {{badges|length}}</strong><span>badges unlocked</span></div><div class="badge-grid badge-grid-all">{% for badge in badges %}<div class="achievement-badge {% if badge.earned %}earned{% else %}locked{% endif %}"><div class="achievement-icon">{{badge.icon}}</div><div class="achievement-content"><strong>{{badge.name}}</strong><p>{{badge.description}}</p>{% if badge.earned %}<span>✓ Earned</span>{% else %}<div class="badge-progress"><span style="width:{{badge.progress}}%"></span></div><small>{{badge.current}} / {{badge.target}}</small>{% endif %}</div></div>{% endfor %}</div></section>
+{% endblock %}
