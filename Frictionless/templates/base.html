@@ -90,7 +90,7 @@
       addMessage("ai","Hi! I'm Epoch Assistant. I'm new to this application, so start by telling me what you want to do. I can learn which commands work and help you use the app. Try one of the examples below.");
       if(data.first_use) open();
     } else {
-      data.messages.forEach(m=>addMessage("user",m.question)||addMessage("ai",m.answer,m.id));
+      data.messages.forEach(m=>{ addMessage("user",m.question); addMessage("ai",m.answer,m.id); });
     }
     suggestions.innerHTML="";
     data.suggestions.forEach(s=>{const b=document.createElement("button");b.type="button";b.textContent=s;b.onclick=()=>{input.value=s;input.focus();};suggestions.appendChild(b);});
