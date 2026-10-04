@@ -981,6 +981,7 @@ def study_streak_data(username):
         "SELECT DISTINCT DATE(created_at) AS day FROM study_activity WHERE username=? ORDER BY day DESC",
         (username,),
     ).fetchall()
+    activity_row = conn.execute("SELECT COUNT(*) AS count FROM study_activity WHERE username=?", (username,)).fetchone()
     conn.close()
     dates = [dt.date.fromisoformat(row["day"]) for row in rows if row["day"]]
     if not dates:
@@ -1000,7 +1001,7 @@ def study_streak_data(username):
         run = run + 1 if previous and day == previous + dt.timedelta(days=1) else 1
         best = max(best, run)
         previous = day
-    activity_count = len(dates)
+    activity_count = activity_row["count"] if activity_row else 0
     return {"current": current, "best": best, "xp": activity_count * 10 + current * 5, "activity_count": activity_count}
 
 
