@@ -1,9 +1,18 @@
-{% extends "base.html" %}{% block title %}Study Hub · Epoch{% endblock %}{% block content %}
-<div class="topbar"><div><h1>📚 Study Hub</h1><p>Your NotebookLM-style learning workspace: sources, notebooks, AI, active recall and quizzes.</p></div><a class="btn" href="{{url_for('study_notebooks')}}">📓 Notebooks</a></div>
+{% extends "base.html" %}
+{% block title %}Study Hub · Epoch{% endblock %}
+{% block content %}
+<div class="topbar"><div><h1>📚 Study Hub</h1><p>Your NotebookLM-style learning workspace: sources, notebooks, AI, active recall and quizzes.</p></div><div class="actions"><a class="btn secondary" href="{{url_for('study_achievements')}}">🏆 Achievements</a><a class="btn" href="{{url_for('study_notebooks')}}">📓 Notebooks</a></div></div>
 <div class="hero-grid study-actions">
 <a class="hero-card study-action" href="{{url_for('study_notebooks')}}"><span class="study-action-icon">📓</span><h3>Notebooks & Groups</h3><p>Organise subjects such as Computer Science → Algorithms → Sorting.</p><span class="btn">Open Notebooks</span></a>
 <a class="hero-card study-action" href="{{url_for('study_sources')}}"><span class="study-action-icon">📄</span><h3>Quick Sources</h3><p>Upload PDFs/TXT files and build a searchable index.</p><span class="btn">Open Sources</span></a>
 <a class="hero-card study-action" href="{{url_for('study_workspace')}}"><span class="study-action-icon">🧠</span><h3>AI Workspace</h3><p>Ask questions, summaries, notes, flashcards and practice questions.</p><span class="btn">Open Workspace</span></a>
 </div>
+<section class="study-progress-grid">
+  <div class="study-progress-card"><span>🔥 Current streak</span><strong>{{ study_streak.current }} days</strong><small>{% if study_streak.current %}Keep it going!{% else %}Study today to start one.{% endif %}</small></div>
+  <div class="study-progress-card"><span>🏅 Best streak</span><strong>{{ study_streak.best }} days</strong><small>Your personal record.</small></div>
+  <div class="study-progress-card"><span>✨ Study XP</span><strong>{{ study_streak.xp }}</strong><small>Earn XP from study activity.</small></div>
+</section>
+<section class="card study-achievement-panel"><div class="achievement-heading"><div><h2>🏆 Achievements</h2><p>Keep studying to unlock badges.</p></div><a class="btn small secondary" href="{{url_for('study_achievements')}}">View all</a></div>
+<div class="badge-grid">{% for badge in badges if badge.earned %}<div class="achievement-badge earned"><div class="achievement-icon">{{badge.icon}}</div><div><strong>{{badge.name}}</strong><p>{{badge.description}}</p><span>✓ Earned</span></div></div>{% else %}<div class="achievement-empty">No badges yet — start studying to unlock your first badge.</div>{% endfor %}</div></section>
 <div class="notice">For best results, keep related material in the same notebook. Epoch can combine multiple sources instead of relying on one retrieved chunk.</div>
 {% endblock %}

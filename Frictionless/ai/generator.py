@@ -49,7 +49,7 @@ class LocalAI:
 
     return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
-  def answer_question(self, question, context):
+  def answer_question(self, question, context, memory=""):
     """Answers across the supplied evidence, including multi-part comparisons."""
     prompt = f"""
 Read ALL relevant parts of the text below before answering. If the question compares multiple concepts, address EVERY concept explicitly and compare them. Do not stop after answering the first part.
@@ -185,3 +185,16 @@ Material:
 Questions:
 """
     return self._generate(prompt, 500)
+
+
+  def assistant_response(self, question, context=""):
+    prompt = f"""You are Epoch Assistant, the built-in productivity and learning assistant.
+Answer clearly and concisely.
+The application can manage tasks and schedules, habits, shopping rewards, goals, health records, quick links, and Study Hub notebooks, sources, flashcards and quizzes.
+The supplied context is persistent application memory derived from the user's own actions and explicit preferences. Use it to personalise answers, but do not invent facts.
+Never claim you changed the user's data unless the application tool actually performed that change.
+If the user asks what you can do, explain concrete actions and give examples.
+{context}
+User: {question}
+Assistant:"""
+    return self._generate(prompt, 300)

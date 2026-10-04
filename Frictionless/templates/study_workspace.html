@@ -48,42 +48,65 @@
     <div class="study-chat-header">
       <div class="study-chat-avatar">⚡</div>
       <div>
-        <strong>StudyChat</strong>
+        <strong>StudyChat <span class="study-chat-beta">BETA</span></strong>
         <span>Ask about your sources</span>
       </div>
     </div>
 
     <div class="study-chat-body">
-      {% if question %}
-        <div class="study-message study-message-user">
-          <div>{{ question }}</div>
-        </div>
-      {% endif %}
-
-      {% if answer %}
-        <div class="study-message study-message-ai">
-          <div class="study-answer">{{ answer }}</div>
-          {% if answer_sources %}
-            <div class="study-citations">
-              <div class="study-citations-title">Sources</div>
-              {% for source in answer_sources %}
-                <a class="study-check" href="#{{ source.anchor }}" data-target="{{ source.anchor }}">
-                  <span>{{ source.filename }} · Line {{ source.line }}</span>
-                  <span>Check →</span>
-                </a>
-              {% endfor %}
+      {% if chat_history %}
+        {% for message in chat_history %}
+          {% if not chat_id or message.id != chat_id %}
+            <div class="study-message study-message-user"><div>{{ message.question }}</div></div>
+            <div class="study-message study-message-ai">
+              <div class="study-answer">{{ message.answer }}</div>
+              <div class="study-chat-feedback">
+                {% if message.feedback is none %}
+                  <form method="post" action="{{ url_for('study_chat_feedback') }}"><input type="hidden" name="chat_id" value="{{ message.id }}"><input type="hidden" name="helpful" value="1"><button title="Helpful">👍</button></form>
+                  <form method="post" action="{{ url_for('study_chat_feedback') }}"><input type="hidden" name="chat_id" value="{{ message.id }}"><input type="hidden" name="helpful" value="0"><button title="Not helpful">👎</button></form>
+                {% elif message.feedback == 1 %}
+                  <span>👍 Helpful — remembered</span>
+                {% else %}
+                  <span>👎 Marked as not helpful</span>
+                {% endif %}
+              </div>
             </div>
           {% endif %}
-        </div>
-      {% elif question %}
-        <div class="study-message study-message-ai">
-          <div class="study-answer">No answer was generated. Check that the source material is readable and indexed.</div>
-        </div>
-      {% else %}
+        {% endfor %}
+      {% endif %}
+
+      {% if question %}
+        <div class="study-message study-message-user"><div>{{ question }}</div></div>
+        {% if answer %}
+          <div class="study-message study-message-ai">
+            <div class="study-answer">{{ answer }}</div>
+            {% if answer_sources %}
+              <div class="study-citations">
+                <div class="study-citations-title">Sources</div>
+                {% for source in answer_sources %}
+                  <a class="study-check" href="#{{ source.anchor }}" data-target="{{ source.anchor }}">
+                    <span>{{ source.filename }} · Line {{ source.line }}</span>
+                    <span>Check →</span>
+                  </a>
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if chat_id %}
+              <div class="study-chat-feedback">
+                <span>Was this helpful?</span>
+                <form method="post" action="{{ url_for('study_chat_feedback') }}"><input type="hidden" name="chat_id" value="{{ chat_id }}"><input type="hidden" name="helpful" value="1"><button title="Helpful">👍</button></form>
+                <form method="post" action="{{ url_for('study_chat_feedback') }}"><input type="hidden" name="chat_id" value="{{ chat_id }}"><input type="hidden" name="helpful" value="0"><button title="Not helpful">👎</button></form>
+              </div>
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="study-message study-message-ai"><div class="study-answer">No answer was generated. Check that the source material is readable and indexed.</div></div>
+        {% endif %}
+      {% elif not chat_history %}
         <div class="study-chat-empty">
           <div class="study-chat-empty-icon">💬</div>
           <strong>Ask a question about your notes</strong>
-          <p>Epoch will search the indexed material and show you the passages it used.</p>
+          <p>Epoch searches your material. Helpful answers can become learning memory for future questions.</p>
         </div>
       {% endif %}
     </div>
