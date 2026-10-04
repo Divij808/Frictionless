@@ -394,6 +394,80 @@ def schedule_task(conn, username, name, duration, priority, locked, target_date,
     return cur.lastrowid
 
 
+def reschedule_day_after(conn, username, target_date, anchor_end=None, exclude_id=None, shuffle=False):
+    """Pack flexible tasks around locked tasks and real calendar events."""
+    service = get_calendar_service()
+    events = calendar_events_between(service, target_date, target_date)
+    rows = conn.execute("SELECT * FROM tasks WHERE username=? AND task_date=? AND completed=0 AND locked=0 ORDER BY start_time,id", (username, target_date.isoformat())).fetchall()
+    rows = [r for r in rows if r["id"] != exclude_id]
+    if shuffle:
+        random.shuffle(rows)
+    fixed = conn.execute("SELECT * FROM tasks WHERE username=? AND task_date=? AND completed=0 AND locked=1", (username, target_date.isoformat())).fetchall()
+    blocked = [(time_to_minutes(r["start_time"]), time_to_minutes(r["start_time"]) + task_duration(r)) for r in fixed]
+    blocked.extend((e["start"], e["end"]) for e in events if not e.get("all_day"))
+    blocked.sort()
+
+    def next_free(earliest, duration, deadline):
+        limit = WORK_END if deadline.date() > target_date else min(WORK_END, deadline.hour * 60 + deadline.minute)
+        cursor = max(WORK_START, earliest)
+        for b_start, b_end in blocked:
+            if b_end <= cursor:
+                continue
+            if cursor + duration <= b_start:
+                return cursor
+            cursor = max(cursor, b_end)
+            if cursor + duration > limit:
+                return None
+        return cursor if cursor + duration <= limit else None
+
+    cursor = max(WORK_START, anchor_end or WORK_START)
+    for row in rows:
+        duration = task_duration(row)
+        deadline = parse_deadline(row["deadline"], target_date)
+        new_start = next_free(max(cursor, time_to_minutes(row["schedule_after"])), duration, deadline)
+        if new_start is None:
+            new_date = target_date + dt.timedelta(days=1)
+            while new_date <= deadline.date():
+                new_start = find_free_slot(conn, username, new_date, duration, WORK_START, deadline, events, row["id"])
+                if new_start is not None:
+                    conn.execute("UPDATE tasks SET task_date=?,day=?,start_time=?,end_time=?,missed_deadline=0 WHERE id=? AND username=?", (new_date.isoformat(), new_date.strftime("%A"), minutes_to_time(new_start), minutes_to_time(new_start + duration), row["id"], username))
+                    update_google_event(service, row, new_date, new_start, duration)
+                    break
+                new_date += dt.timedelta(days=1)
+            if new_start is None:
+                conn.execute("UPDATE tasks SET missed_deadline=1 WHERE id=? AND username=?", (row["id"], username))
+                continue
+            cursor = WORK_END
+            continue
+        conn.execute("UPDATE tasks SET start_time=?,end_time=?,missed_deadline=0 WHERE id=? AND username=?", (minutes_to_time(new_start), minutes_to_time(new_start + duration), row["id"], username))
+        update_google_event(service, row, target_date, new_start, duration)
+        cursor = new_start + duration
+    conn.commit()
+
+
+def start_task_now_and_push(conn, username, task_id):
+    task = conn.execute("SELECT * FROM tasks WHERE id=? AND username=? AND completed=0", (task_id, username)).fetchone()
+    if not task:
+        return False, "Task not found."
+    if task["locked"]:
+        return False, "This task is locked and cannot be automatically moved."
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    target_date = now.date()
+    start = ((max(WORK_START, now.hour * 60 + now.minute) + 4) // 5) * 5
+    duration = task_duration(task)
+    deadline = parse_deadline(task["deadline"], target_date)
+    service = get_calendar_service()
+    events = calendar_events_between(service, target_date, target_date)
+    start = find_free_slot(conn, username, target_date, duration, start, deadline, events, task_id)
+    if start is None:
+        return False, "No free time is available for this task today before its deadline."
+    conn.execute("UPDATE tasks SET task_date=?,day=?,start_time=?,end_time=?,missed_deadline=0 WHERE id=? AND username=?", (target_date.isoformat(), target_date.strftime("%A"), minutes_to_time(start), minutes_to_time(start + duration), task_id, username))
+    updated = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    update_google_event(service, updated, target_date, start, duration)
+    reschedule_day_after(conn, username, target_date, start + duration, exclude_id=task_id)
+    return True, f"Started '{task['name']}' at {minutes_to_time(start)}. Other flexible tasks were moved around it."
+
+
 def user_coins(conn, username):
     row = conn.execute("SELECT coins FROM users WHERE username=?", (username,)).fetchone()
     return row["coins"] if row else 0
@@ -513,6 +587,18 @@ def dashboard():
     schedules,monday=build_schedule(conn,username,week_offset)
     context=dashboard_context(conn); context.update({"page":"dashboard","day_schedules":schedules,"week_offset":week_offset,"target_monday":monday.strftime("%B %d, %Y"),"today_date":dt.date.today().isoformat()})
     conn.close(); return render_template("tasks.html",**context)
+
+
+@app.route("/start-task-now/<int:task_id>", methods=["POST"])
+@login_required
+def start_task_now(task_id):
+    conn=db(); ok,message=start_task_now_and_push(conn,session["user"],task_id); conn.close(); flash(message,"success" if ok else "error"); return redirect(url_for("dashboard"))
+
+
+@app.route("/shuffle-tasks", methods=["POST"])
+@login_required
+def shuffle_tasks():
+    conn=db(); target_date=parse_date(request.form.get("task_date"),dt.date.today()); reschedule_day_after(conn,session["user"],target_date,WORK_START,shuffle=True); conn.close(); flash(f"Flexible tasks shuffled for {target_date.strftime('%A %d %B')}. Locked tasks and calendar events stayed fixed.","success"); return redirect(url_for("dashboard"))
 
 
 @app.route("/page/<int:tab_id>")
