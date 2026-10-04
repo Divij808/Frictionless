@@ -128,44 +128,6 @@ def init_db():
             block_type TEXT NOT NULL, content TEXT DEFAULT '', checked INTEGER DEFAULT 0,
             metadata TEXT DEFAULT ''
         );
-        CREATE TABLE IF NOT EXISTS study_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            icon TEXT DEFAULT '📚'
-        );
-        CREATE TABLE IF NOT EXISTS notebooks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            group_id INTEGER,
-            name TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS notebook_sources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            notebook_id INTEGER NOT NULL,
-            source_id TEXT,
-            title TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            url TEXT DEFAULT '',
-            chunks INTEGER DEFAULT 0,
-            characters INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS study_cards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            notebook_id INTEGER NOT NULL,
-            front TEXT NOT NULL,
-            back TEXT NOT NULL,
-            interval_days INTEGER NOT NULL DEFAULT 0,
-            ease REAL NOT NULL DEFAULT 2.5,
-            due_at TEXT NOT NULL,
-            reps INTEGER NOT NULL DEFAULT 0
-        );
     """)
     for col, definition in [("coins", "INTEGER NOT NULL DEFAULT 0"), ("height_cm", "REAL"), ("weight_kg", "REAL")]:
         add_column_if_missing(conn, "users", col, definition)
@@ -1427,7 +1389,6 @@ def study_notebook_workspace(notebook_id):
         workspace_back_url=url_for("study_notebook", notebook_id=notebook_id),
         workspace_back_label="Notebook",
     )
-
 
 @app.route("/shop/redeem-form/<int:item_id>", methods=["POST"])
 @login_required
