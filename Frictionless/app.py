@@ -1113,26 +1113,64 @@ def study_cards(notebook_id):
         front = request.form.get("front", "").strip()
         back = request.form.get("back", "").strip()
         deadline_raw = request.form.get("deadline", "").strip()
+        is_exam = request.form.get("is_exam") == "1"
+
         if front and back:
-            conn.execute("INSERT INTO study_cards(username,notebook_id,front,back,due_at) VALUES(?,?,?,?,?)",
-                         (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds")))
+            exam_deadline = None
             if deadline_raw:
                 try:
-                    deadline = dt.datetime.fromisoformat(deadline_raw)
-                    if deadline <= dt.datetime.now():
+                    exam_deadline = dt.datetime.fromisoformat(deadline_raw)
+                    if exam_deadline <= dt.datetime.now():
                         raise ValueError("Deadline must be in the future.")
-                    # A flashcard review is a normal Epoch task, so it is automatically
-                    # placed into the user's schedule and Google Calendar.
-                    schedule_task(conn, session["user"], f"Review flashcards: {notebook['name']}",
-                                  30, "Medium", 0, deadline.date(), "08:00", deadline, 0,
-                                  get_calendar_service())
-                    flash(f"Flashcard added. I am adding a 30-minute review session to your calendar before {deadline.strftime('%A %d %B at %H:%M')}.", "success")
                 except ValueError as exc:
-                    flash(f"Flashcard was added, but the calendar review was not scheduled: {exc}", "error")
-            else:
-                flash("Flashcard added. Set a deadline next time to automatically schedule a calendar review.", "success")
+                    flash(f"Flashcard was not added: {exc}", "error")
+                    conn.close()
+                    return redirect(url_for("study_cards", notebook_id=notebook_id))
+
+            cur = conn.execute(
+                "INSERT INTO study_cards(username,notebook_id,front,back,due_at,exam_deadline) VALUES(?,?,?,?,?,?)",
+                (session["user"], notebook_id, front, back,
+                 dt.datetime.now().isoformat(timespec="seconds"),
+                 exam_deadline.isoformat(timespec="minutes") if is_exam and exam_deadline else None)
+            )
             conn.commit()
-    cards = conn.execute("SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at", (session["user"], notebook_id)).fetchall()
+
+            if exam_deadline:
+                try:
+                    card = conn.execute(
+                        "SELECT * FROM study_cards WHERE id=?", (cur.lastrowid,)
+                    ).fetchone()
+                    first_review = min(
+                        exam_deadline,
+                        dt.datetime.now().replace(second=0, microsecond=0) + dt.timedelta(days=1)
+                    )
+                    if first_review.date() == dt.datetime.now().date() and exam_deadline.date() != dt.datetime.now().date():
+                        first_review = dt.datetime.combine(
+                            dt.datetime.now().date() + dt.timedelta(days=1), dt.time(18, 0)
+                        )
+                    schedule_flashcard_calendar_review(
+                        conn, card, first_review, notebook["name"],
+                        exam_deadline=exam_deadline if is_exam else None
+                    )
+                    flash(
+                        f"Flashcard added. Epoch added a 30-minute review to your calendar for "
+                        f"{first_review.strftime('%A %d %B at %H:%M')}.",
+                        "success"
+                    )
+                except Exception as exc:
+                    flash(f"Flashcard added, but the calendar review was not scheduled: {exc}", "error")
+            else:
+                flash(
+                    "Flashcard added. Set an exam/review deadline to have Epoch automatically "
+                    "reschedule future reviews on your calendar.",
+                    "success"
+                )
+            conn.commit()
+
+    cards = conn.execute(
+        "SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at",
+        (session["user"], notebook_id)
+    ).fetchall()
     conn.close()
     return render_template("study_cards.html", page="study", notebook=notebook, cards=cards)
 
