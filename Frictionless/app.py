@@ -128,6 +128,83 @@ def init_db():
             block_type TEXT NOT NULL, content TEXT DEFAULT '', checked INTEGER DEFAULT 0,
             metadata TEXT DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS study_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            icon TEXT DEFAULT '📚'
+        );
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            group_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notebook_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL,
+            source_id TEXT,
+            title TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            url TEXT DEFAULT '',
+            chunks INTEGER DEFAULT 0,
+            characters INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS study_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL,
+            front TEXT NOT NULL,
+            back TEXT NOT NULL,
+            interval_days INTEGER NOT NULL DEFAULT 0,
+            ease REAL NOT NULL DEFAULT 2.5,
+            due_at TEXT NOT NULL,
+            reps INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS study_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS study_achievements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            badge_id TEXT NOT NULL,
+            earned_at TEXT NOT NULL,
+            UNIQUE(username, badge_id)
+        );
+        CREATE TABLE IF NOT EXISTS study_chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            notebook_id INTEGER,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            source_refs TEXT DEFAULT '[]',
+            feedback INTEGER,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS assistant_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            intent TEXT NOT NULL,
+            success INTEGER NOT NULL DEFAULT 0,
+            action_json TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS assistant_skill_stats (
+            intent TEXT PRIMARY KEY,
+            uses INTEGER NOT NULL DEFAULT 0,
+            successes INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
     """)
     for col, definition in [("coins", "INTEGER NOT NULL DEFAULT 0"), ("height_cm", "REAL"), ("weight_kg", "REAL")]:
         add_column_if_missing(conn, "users", col, definition)
@@ -1042,6 +1119,247 @@ def get_study_chat_history(username, notebook_id):
         rows = conn.execute("SELECT * FROM study_chat_messages WHERE username=? AND notebook_id=? ORDER BY id DESC LIMIT 20", (username, notebook_id)).fetchall()
     conn.close()
     return list(reversed(rows))
+
+
+def assistant_find_task(conn, username, phrase):
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE username=? AND completed=0 ORDER BY task_date,start_time,id",
+        (username,),
+    ).fetchall()
+    phrase_words = set(re.findall(r"[A-Za-z0-9]{3,}", phrase.lower()))
+    best = None
+    best_score = 0
+    for row in rows:
+        words = set(re.findall(r"[A-Za-z0-9]{3,}", row["name"].lower()))
+        score = len(phrase_words & words)
+        if phrase.lower() in row["name"].lower():
+            score += 10
+        if score > best_score:
+            best_score, best = score, row
+    return best if best_score > 0 else (rows[0] if rows else None)
+
+
+def assistant_parse_task(message):
+    text = message.strip()
+    lower = text.lower()
+    duration = 60
+    match = re.search(r"(?:for|lasting|takes?)\s+(\d+)\s*(minutes?|mins?|m|hours?|hrs?|h)\b", lower)
+    if match:
+        amount = int(match.group(1))
+        duration = amount * 60 if match.group(2).startswith(("hour", "hr", "h")) else amount
+    target = dt.date.today()
+    if "tomorrow" in lower:
+        target += dt.timedelta(days=1)
+    elif "day after tomorrow" in lower:
+        target += dt.timedelta(days=2)
+    else:
+        iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", lower)
+        if iso:
+            target = parse_date(iso.group(1), target)
+        else:
+            for idx, day_name in enumerate(DAY_NAMES):
+                if re.search(r"\b" + day_name.lower() + r"\b", lower):
+                    delta = (idx - target.weekday()) % 7
+                    target += dt.timedelta(days=delta)
+                    break
+    preferred_start = None
+    time_match = re.search(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2) or 0)
+        meridiem = time_match.group(3)
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        if meridiem == "am" and hour == 12:
+            hour = 0
+        preferred_start = hour * 60 + minute
+    priority = "Medium"
+    for value in ("high", "medium", "low"):
+        if re.search(r"\bpriority\s+" + value + r"\b", lower) or re.search(r"\b" + value + r" priority\b", lower):
+            priority = value.title()
+            break
+    name = text
+    patterns = [
+        r"^\s*(please\s+)?(add|create|make|schedule|put)\s+(a\s+)?task\s*(called|named)?\s*",
+        r"^\s*(please\s+)?remind\s+me\s+to\s+",
+        r"^\s*(please\s+)?put\s+(.+?)\s+on\s+(my\s+)?calendar\s*",
+    ]
+    for pattern in patterns:
+        name = re.sub(pattern, "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\b(?:today|tomorrow|day after tomorrow)\b", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\b20\d{2}-\d{2}-\d{2}\b", "", name)
+    name = re.sub(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\b(?:for|lasting|takes?)\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h)\b", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\b(?:high|medium|low)\s+priority\b|\bpriority\s+(?:high|medium|low)\b", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s+", " ", name).strip(" ,.-")
+    if not name:
+        name = "New task"
+    return {"name": name, "duration": max(5, duration), "date": target, "preferred_start": preferred_start, "priority": priority}
+
+
+def assistant_classify(message):
+    lower = message.lower()
+    if re.search(r"\b(add|create|schedule|remind|put)\b", lower) and re.search(r"\b(task|calendar|reminder)\b", lower):
+        return "create_task"
+    if re.search(r"\b(what('?s| is| do i have)|show|list|check)\b", lower) and re.search(r"\b(calendar|schedule|tasks?|today|tomorrow)\b", lower):
+        return "list_tasks"
+    if re.search(r"\b(mark|set|complete|finish|done)\b", lower) and re.search(r"\b(task|it|this)\b", lower):
+        return "complete_task"
+    if re.search(r"\b(study hub|notebook|flashcard|quiz)\b", lower):
+        return "study_help"
+    return "chat"
+
+
+def assistant_personal_examples(username, intent):
+    conn = db()
+    rows = conn.execute(
+        "SELECT question, answer FROM assistant_messages WHERE username=? AND intent=? AND success=1 ORDER BY id DESC LIMIT 4",
+        (username, intent),
+    ).fetchall()
+    conn.close()
+    return list(rows)
+
+
+def assistant_record(username, question, answer, intent, success, action=None):
+    conn = db()
+    conn.execute(
+        "INSERT INTO assistant_messages(username,question,answer,intent,success,action_json,created_at) VALUES(?,?,?,?,?,?,?)",
+        (username, question, answer, intent, int(success), json.dumps(action or {}, ensure_ascii=False), dt.datetime.now().isoformat(timespec="seconds")),
+    )
+    row = conn.execute("SELECT uses,successes FROM assistant_skill_stats WHERE intent=?", (intent,)).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE assistant_skill_stats SET uses=?,successes=?,updated_at=? WHERE intent=?",
+            (row["uses"] + 1, row["successes"] + int(success), dt.datetime.now().isoformat(timespec="seconds"), intent),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO assistant_skill_stats(intent,uses,successes,updated_at) VALUES(?,?,?,?)",
+            (intent, 1, int(success), dt.datetime.now().isoformat(timespec="seconds")),
+        )
+    conn.commit()
+    conn.close()
+
+
+def assistant_general_answer(username, question):
+    examples = assistant_personal_examples(username, "chat")
+    example_text = "\n".join("Previous successful question: " + row["question"] + "\nPrevious answer: " + row["answer"] for row in examples)
+    app_context = """You are Epoch Assistant, the built-in assistant for the Epoch productivity and learning application.
+You can explain how to use Tasks & Schedule, Habits, Quick Links, Shopping, Loans, Progress, Health, Study Hub, notebooks, flashcards, quizzes and the AI study workspace.
+If the user asks you to perform an action you cannot perform through the available tools, explain that limitation and give the exact page they can use.
+Never claim an action was completed unless the application actually completed it.
+"""
+    prompt = app_context + "\n" + example_text + "\nUser: " + question + "\nAssistant:"
+    return get_epoch_ai()._generate(prompt, 280)
+
+
+@app.route("/api/assistant/history")
+@login_required
+def assistant_history():
+    conn = db()
+    rows = conn.execute(
+        "SELECT id,question,answer,intent,success,created_at FROM assistant_messages WHERE username=? ORDER BY id DESC LIMIT 20",
+        (session["user"],),
+    ).fetchall()
+    conn.close()
+    return jsonify({
+        "messages": [dict(row) for row in reversed(rows)],
+        "first_use": len(rows) == 0,
+        "suggestions": [
+            "Add a task to revise maths tomorrow at 5pm for 1 hour",
+            "What is on my calendar today?",
+            "How do I create a study notebook?",
+        ],
+    })
+
+
+@app.route("/api/assistant/chat", methods=["POST"])
+@login_required
+def assistant_chat():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message", "")).strip()
+    if not message:
+        return jsonify(success=False, error="Enter a message."), 400
+    username = session["user"]
+    intent = assistant_classify(message)
+    answer = ""
+    success = False
+    action = {}
+    conn = db()
+    try:
+        if intent == "create_task":
+            details = assistant_parse_task(message)
+            deadline = dt.datetime.combine(details["date"] + dt.timedelta(days=1), dt.time(23, 59))
+            task_id = schedule_task(
+                conn, username, details["name"], details["duration"], details["priority"], 0,
+                details["date"], "08:00", deadline, 0, get_calendar_service(),
+                preferred_start=details["preferred_start"],
+            )
+            task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            action = {"type": "create_task", "task_id": task_id}
+            answer = f"Done — I added “{task['name']}” to your schedule for {task['day']} {task['task_date']} at {task['start_time']} for {details['duration']} minutes."
+            if task["google_event_id"]:
+                answer += " It was also synced to Google Calendar."
+            success = True
+            study_activity(username, "assistant-task")
+        elif intent == "list_tasks":
+            today = dt.date.today().isoformat()
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE username=? AND task_date=? ORDER BY start_time",
+                (username, today),
+            ).fetchall()
+            if rows:
+                answer = "Today’s schedule:\n" + "\n".join(f"• {row['start_time']} — {row['name']}" + (" ✓" if row["completed"] else "") for row in rows)
+            else:
+                answer = "You have no tasks scheduled for today."
+            success = True
+        elif intent == "complete_task":
+            phrase = re.sub(r"\b(mark|set|complete|finish|done)\b", "", message, flags=re.IGNORECASE)
+            task = assistant_find_task(conn, username, phrase)
+            if not task:
+                answer = "I could not find an unfinished task matching that request."
+            else:
+                conn.execute("UPDATE tasks SET completed=1 WHERE id=? AND username=?", (task["id"], username))
+                conn.execute("UPDATE users SET coins=MAX(0,coins+?) WHERE username=?", (COINS_PER_COMPLETION, username))
+                conn.commit()
+                answer = f"Done — “{task['name']}” is marked complete and you earned {COINS_PER_COMPLETION} coins."
+                action = {"type": "complete_task", "task_id": task["id"]}
+                success = True
+        elif intent == "study_help":
+            answer = assistant_general_answer(username, message)
+            success = True
+        else:
+            answer = assistant_general_answer(username, message)
+            success = bool(answer)
+    except Exception as exc:
+        conn.rollback()
+        answer = f"I couldn't complete that action: {exc}"
+    finally:
+        conn.close()
+    assistant_record(username, message, answer, intent, success, action)
+    return jsonify(success=True, answer=answer, intent=intent, action=action, learning=True)
+
+
+@app.route("/api/assistant/feedback", methods=["POST"])
+@login_required
+def assistant_feedback():
+    data = request.get_json(silent=True) or {}
+    message_id = data.get("message_id")
+    helpful = 1 if data.get("helpful") else 0
+    conn = db()
+    row = conn.execute("SELECT intent FROM assistant_messages WHERE id=? AND username=?", (message_id, session["user"])).fetchone()
+    if not row:
+        conn.close()
+        return jsonify(success=False), 404
+    conn.execute("UPDATE assistant_messages SET success=? WHERE id=? AND username=?", (helpful, message_id, session["user"]))
+    row2 = conn.execute("SELECT uses,successes FROM assistant_skill_stats WHERE intent=?", (row["intent"],)).fetchone()
+    if row2:
+        delta = helpful - (1 if helpful == 0 else 0)
+        conn.execute("UPDATE assistant_skill_stats SET successes=MAX(0,successes+?),updated_at=? WHERE intent=?", (delta, dt.datetime.now().isoformat(timespec="seconds"), row["intent"]))
+    conn.commit()
+    conn.close()
+    return jsonify(success=True)
 
 def study_notebooks():
     conn = db()
