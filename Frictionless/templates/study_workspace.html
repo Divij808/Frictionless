@@ -1,6 +1,120 @@
-{% extends "base.html" %}{% block title %}Study Workspace · Epoch{% endblock %}{% block content %}
-<div class="topbar"><div><h1>Study Workspace</h1><p>Epoch model: {{ model_name }}</p></div><a class="btn secondary study-nav-button" href="{{ url_for('study_sources') }}">Manage Sources</a></div>
-<section class="card"><h2>Ask Epoch</h2><form method="post" action="{{ url_for('study_workspace') }}"><input type="hidden" name="mode" value="ask"><label>Question<input name="question" placeholder="e.g. What is the difference between RAM and ROM?" required></label><button type="submit" class="btn study-nav-button">Ask</button></form>{% if answer is not none %}<div class="answer"><h3>Epoch's Answer</h3><p>{{ answer }}</p>{% for source in answer_sources %}<span class="badge">{{ source.filename }} · {{ source.score }}</span>{% endfor %}</div>{% endif %}</section>
-<section class="card"><h2>Generate Material</h2><form method="post" action="{{ url_for('study_workspace') }}"><input type="hidden" name="mode" value="generate"><div class="grid grid-4">{% for source in sources %}<label class="check"><input type="checkbox" name="source_ids" value="{{ source.id }}"> {{ source.filename }}</label>{% else %}<div class="notice">No sources uploaded yet. <a href="{{ url_for('study_sources') }}">Upload a source first.</a></div>{% endfor %}</div><div class="actions"><button type="submit" class="btn study-nav-button" name="action" value="summary">Generate Summary</button><button type="submit" class="btn study-nav-button" name="action" value="notes">Generate Notes</button><button type="submit" class="btn study-nav-button" name="action" value="flashcards">Generate Flashcards</button><button type="submit" class="btn study-nav-button" name="action" value="questions">Generate Questions</button></div></form></section>
-{% if result is not none %}<section class="card"><h2>{{ result_title }}</h2>{% if selected_action=='flashcards' and result is iterable and result is not string %}{% for card in result %}<div class="flashcard"><strong>{{ loop.index }} · {{ card.type }}</strong><h3>{{ card.question }}</h3><p>{{ card.answer }}</p></div>{% endfor %}{% else %}<pre class="result">{{ result }}</pre>{% endif %}</section>{% endif %}
+{% extends "base.html" %}
+{% block title %}{{ workspace_heading|default("Study Space") }} · Epoch{% endblock %}
+{% block content %}
+<div class="study-space-header">
+  <div>
+    <div class="study-space-kicker">📚 Study Space</div>
+    <h1>{{ workspace_heading|default("Study Space") }}</h1>
+    <p>{{ workspace_subheading|default("Read your material and ask Epoch questions beside it.") }}</p>
+  </div>
+  <a class="btn secondary" href="{{ workspace_back_url|default(url_for('study_sources')) }}">← {{ workspace_back_label|default("Back") }}</a>
+</div>
+
+<div class="study-space">
+  <main class="study-document card">
+    <div class="study-document-header">
+      <div>
+        <h2>Source material</h2>
+        <p>Click <strong>Check</strong> in the chat to jump to the passage used for the answer.</p>
+      </div>
+      <span class="study-source-count">{{ document_sections|length }} passages</span>
+    </div>
+
+    {% if document_sections %}
+      <div class="study-document-body">
+        {% for section in document_sections %}
+          <article class="source-passage" id="{{ section.anchor }}">
+            <div class="source-passage-head">
+              <span class="source-line">Line {{ section.line }}</span>
+              <span class="source-name">{{ section.filename }}</span>
+            </div>
+            <p>{{ section.text }}</p>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="notice">
+        No study material has been indexed yet.
+        {% if notebook is defined %}
+          <a href="{{ url_for('study_notebook', notebook_id=notebook.id) }}">Add a source to this notebook.</a>
+        {% else %}
+          <a href="{{ url_for('study_sources') }}">Upload a source first.</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </main>
+
+  <aside class="study-chat card">
+    <div class="study-chat-header">
+      <div class="study-chat-avatar">⚡</div>
+      <div>
+        <strong>StudyChat</strong>
+        <span>Ask about your sources</span>
+      </div>
+    </div>
+
+    <div class="study-chat-body">
+      {% if question %}
+        <div class="study-message study-message-user">
+          <div>{{ question }}</div>
+        </div>
+      {% endif %}
+
+      {% if answer %}
+        <div class="study-message study-message-ai">
+          <div class="study-answer">{{ answer }}</div>
+          {% if answer_sources %}
+            <div class="study-citations">
+              <div class="study-citations-title">Sources</div>
+              {% for source in answer_sources %}
+                <a class="study-check" href="#{{ source.anchor }}" data-target="{{ source.anchor }}">
+                  <span>{{ source.filename }} · Line {{ source.line }}</span>
+                  <span>Check →</span>
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% elif question %}
+        <div class="study-message study-message-ai">
+          <div class="study-answer">No answer was generated. Check that the source material is readable and indexed.</div>
+        </div>
+      {% else %}
+        <div class="study-chat-empty">
+          <div class="study-chat-empty-icon">💬</div>
+          <strong>Ask a question about your notes</strong>
+          <p>Epoch will search the indexed material and show you the passages it used.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    <form class="study-chat-form" method="post" action="">
+      <input type="hidden" name="mode" value="ask">
+      <textarea name="question" rows="3" placeholder="Ask a question about your sources..." required>{{ question }}</textarea>
+      <div class="study-chat-form-bottom">
+        <span>Answers are based on indexed source material.</span>
+        <button class="btn" type="submit">Ask</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+<script>
+document.querySelectorAll(".study-check").forEach(function(link) {
+  link.addEventListener("click", function() {
+    window.setTimeout(function() {
+      var target = document.getElementById(link.dataset.target);
+      if (target) {
+        document.querySelectorAll(".source-passage.is-highlighted").forEach(function(item) {
+          item.classList.remove("is-highlighted");
+        });
+        target.classList.add("is-highlighted");
+        window.setTimeout(function() {
+          target.classList.remove("is-highlighted");
+        }, 1800);
+      }
+    }, 0);
+  });
+});
+</script>
 {% endblock %}

@@ -1,11 +1,17 @@
 import os
 import sqlite3
 import datetime as dt
-from functools import wraps
-from urllib.parse import urlparse
-from pathlib import Path
+import csv
+import io
 import json
+import re
+import statistics
 import uuid
+from functools import wraps
+from urllib.parse import urlparse, parse_qs
+from pathlib import Path
+
+import requests
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -121,6 +127,44 @@ def init_db():
             tab_id INTEGER NOT NULL, block_order INTEGER NOT NULL,
             block_type TEXT NOT NULL, content TEXT DEFAULT '', checked INTEGER DEFAULT 0,
             metadata TEXT DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS study_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            icon TEXT DEFAULT '📚'
+        );
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            group_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notebook_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL,
+            source_id TEXT,
+            title TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            url TEXT DEFAULT '',
+            chunks INTEGER DEFAULT 0,
+            characters INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS study_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL,
+            front TEXT NOT NULL,
+            back TEXT NOT NULL,
+            interval_days INTEGER NOT NULL DEFAULT 0,
+            ease REAL NOT NULL DEFAULT 2.5,
+            due_at TEXT NOT NULL,
+            reps INTEGER NOT NULL DEFAULT 0
         );
     """)
     for col, definition in [("coins", "INTEGER NOT NULL DEFAULT 0"), ("height_cm", "REAL"), ("weight_kg", "REAL")]:
@@ -1215,13 +1259,14 @@ def study_delete_source(source_id):
 def study_workspace():
     answer = None
     answer_sources = []
+    question = ""
     result = None
     result_title = None
     selected_action = None
+    retriever = epoch_retriever()
 
     if request.method == "POST":
-        mode = request.form.get("mode", "")
-        retriever = epoch_retriever()
+        mode = request.form.get("mode", "ask")
 
         if mode == "ask":
             question = request.form.get("question", "").strip()
@@ -1233,12 +1278,20 @@ def study_workspace():
                     answer = "Upload a source first so Epoch has material to search."
                 else:
                     context_text = "\n\n".join(
-                        f"[Source: {item['filename']}]\n{item['text']}" for item in matches
+                        f"[Source: {item['filename']} | Passage {item['chunk'] + 1}]\n{item['text']}"
+                        for item in matches
                     )
                     try:
                         answer = get_epoch_ai().answer_question(question, context_text)
                         answer_sources = [
-                            {"filename": item["filename"], "score": round(item["score"], 3)}
+                            {
+                                "filename": item["filename"],
+                                "source_id": item["source_id"],
+                                "chunk": item["chunk"],
+                                "score": round(item["score"], 3),
+                                "anchor": f"source-passage-{item['source_id']}-{item['chunk']}",
+                                "line": item["chunk"] + 1,
+                            }
                             for item in matches
                         ]
                     except Exception as exc:
@@ -1271,20 +1324,109 @@ def study_workspace():
                 except Exception as exc:
                     flash(f"AI generation failed: {exc}", "error")
 
+    all_sources = load_epoch_sources()
+    source_ids = [source["id"] for source in all_sources]
+    document_sections = []
+    for item in retriever.get_chunks_for_sources(source_ids):
+        section = dict(item)
+        section["anchor"] = f"source-passage-{item['source_id']}-{item['chunk']}"
+        section["line"] = item["chunk"] + 1
+        document_sections.append(section)
+
     conn = db()
     context = dashboard_context(conn)
     conn.close()
     context.update({
         "page": "study",
-        "sources": load_epoch_sources(),
+        "sources": all_sources,
+        "document_sections": document_sections,
         "answer": answer,
         "answer_sources": answer_sources,
+        "question": question,
         "result": result,
         "result_title": result_title,
         "selected_action": selected_action,
         "model_name": os.getenv("EPOCH_MODEL", "google/flan-t5-base"),
+        "workspace_heading": "Study Space",
+        "workspace_subheading": "Read your material on the left and ask Epoch questions on the right.",
+        "workspace_back_url": url_for("study_sources"),
+        "workspace_back_label": "Manage Sources",
     })
     return render_template("study_workspace.html", **context)
+
+
+@app.route("/study/notebook/<int:notebook_id>/workspace", methods=["GET", "POST"])
+@login_required
+def study_notebook_workspace(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        flash("Notebook not found.", "error")
+        return redirect(url_for("study_notebooks"))
+
+    data_dir, _ = epoch_user_paths()
+    retriever = Retriever(data_dir / f"notebook_{notebook_id}.json")
+    sources = notebook_sources(notebook_id)
+    source_map = {source["source_id"]: source["title"] for source in sources if source["source_id"]}
+
+    answer = None
+    answer_sources = []
+    question = ""
+
+    if request.method == "POST":
+        question = request.form.get("question", "").strip()
+        if not question:
+            flash("Enter a question.", "error")
+        else:
+            matches = retriever.search(question, top_k=12)
+            if not matches:
+                answer = "Add a source to this notebook first so Epoch has material to search."
+            else:
+                context_text = "\n\n".join(
+                    f"[Source: {source_map.get(item['source_id'], item['filename'])} | Passage {item['chunk'] + 1}]\n{item['text']}"
+                    for item in matches
+                )
+                try:
+                    answer = get_epoch_ai().answer_question(question, context_text)
+                    answer_sources = [
+                        {
+                            "filename": source_map.get(item["source_id"], item["filename"]),
+                            "source_id": item["source_id"],
+                            "chunk": item["chunk"],
+                            "score": round(item["score"], 3),
+                            "anchor": f"source-passage-{item['source_id']}-{item['chunk']}",
+                            "line": item["chunk"] + 1,
+                        }
+                        for item in matches
+                    ]
+                except Exception as exc:
+                    flash(f"AI generation failed: {exc}", "error")
+
+    document_sections = []
+    for item in retriever.get_chunks_for_sources(list(source_map.keys())):
+        section = dict(item)
+        section["filename"] = source_map.get(item["source_id"], item["filename"])
+        section["anchor"] = f"source-passage-{item['source_id']}-{item['chunk']}"
+        section["line"] = item["chunk"] + 1
+        document_sections.append(section)
+
+    return render_template(
+        "study_workspace.html",
+        page="study",
+        notebook=notebook,
+        sources=sources,
+        document_sections=document_sections,
+        answer=answer,
+        answer_sources=answer_sources,
+        question=question,
+        result=None,
+        result_title=None,
+        selected_action=None,
+        model_name=os.getenv("EPOCH_MODEL", "google/flan-t5-base"),
+        workspace_heading=notebook["name"],
+        workspace_subheading="Read your notebook sources and ask questions without leaving the page.",
+        workspace_back_url=url_for("study_notebook", notebook_id=notebook_id),
+        workspace_back_label="Notebook",
+    )
 
 
 @app.route("/shop/redeem-form/<int:item_id>", methods=["POST"])
