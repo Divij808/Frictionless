@@ -940,6 +940,10 @@ STUDY_BADGES = [
     {"id":"card-maker","icon":"🃏","name":"Card Maker","description":"Create your first flashcard.","type":"cards","target":1},
     {"id":"active-recall","icon":"⚡","name":"Active Recall","description":"Review 10 flashcards.","type":"reviews","target":10},
     {"id":"study-machine","icon":"🏆","name":"Study Machine","description":"Review 50 flashcards.","type":"reviews","target":50},
+    {"id":"three-day-streak","icon":"🔥","name":"3-Day Streak","description":"Study on 3 consecutive days.","type":"streak","target":3},
+    {"id":"week-streak","icon":"🔥","name":"7-Day Streak","description":"Study on 7 consecutive days.","type":"streak","target":7},
+    {"id":"fortnight-streak","icon":"🚀","name":"14-Day Streak","description":"Study on 14 consecutive days.","type":"streak","target":14},
+    {"id":"month-streak","icon":"👑","name":"30-Day Streak","description":"Study on 30 consecutive days.","type":"streak","target":30},
 ]
 
 def study_activity(username, activity_type):
@@ -950,7 +954,9 @@ def study_activity(username, activity_type):
 
 def get_study_achievements(username):
     conn = db()
+    streak = study_streak_data(username)
     counts = {
+        "streak": streak["current"],
         "sources": conn.execute("SELECT COUNT(*) FROM notebook_sources WHERE username=?", (username,)).fetchone()[0],
         "notebooks": conn.execute("SELECT COUNT(*) FROM notebooks WHERE username=?", (username,)).fetchone()[0],
         "questions": conn.execute("SELECT COUNT(*) FROM study_activity WHERE username=? AND activity_type='question'", (username,)).fetchone()[0],
@@ -968,6 +974,73 @@ def get_study_achievements(username):
         current = counts.get(badge["type"], 0)
         badges.append({**badge, "current": min(current, badge["target"]), "earned": badge["id"] in earned_ids, "progress": min(100, int(current / badge["target"] * 100))})
     return badges, sum(1 for badge in badges if badge["earned"])
+
+def study_streak_data(username):
+    conn = db()
+    rows = conn.execute(
+        "SELECT DISTINCT DATE(created_at) AS day FROM study_activity WHERE username=? ORDER BY day DESC",
+        (username,),
+    ).fetchall()
+    conn.close()
+    dates = [dt.date.fromisoformat(row["day"]) for row in rows if row["day"]]
+    if not dates:
+        return {"current": 0, "best": 0, "xp": 0, "activity_count": 0}
+    date_set = set(dates)
+    current = 0
+    cursor = dt.date.today()
+    if cursor not in date_set:
+        cursor -= dt.timedelta(days=1)
+    while cursor in date_set:
+        current += 1
+        cursor -= dt.timedelta(days=1)
+    best = 0
+    run = 0
+    previous = None
+    for day in sorted(date_set):
+        run = run + 1 if previous and day == previous + dt.timedelta(days=1) else 1
+        best = max(best, run)
+        previous = day
+    activity_count = len(dates)
+    return {"current": current, "best": best, "xp": activity_count * 10 + current * 5, "activity_count": activity_count}
+
+
+def save_study_chat(username, notebook_id, question, answer, source_refs):
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO study_chat_messages(username,notebook_id,question,answer,source_refs,created_at) VALUES(?,?,?,?,?,?)",
+        (username, notebook_id, question, answer, json.dumps(source_refs, ensure_ascii=False), dt.datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    chat_id = cur.lastrowid
+    conn.close()
+    return chat_id
+
+
+def study_chat_memory(username, notebook_id, question):
+    words = {w.lower() for w in re.findall(r"[A-Za-z0-9]{4,}", question)}
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, question, answer FROM study_chat_messages WHERE username=? AND feedback=1 AND (notebook_id=? OR notebook_id IS NULL) ORDER BY created_at DESC LIMIT 40",
+        (username, notebook_id),
+    ).fetchall()
+    conn.close()
+    ranked = []
+    for row in rows:
+        old_words = set(re.findall(r"[A-Za-z0-9]{4,}", row["question"].lower()))
+        ranked.append((len(words & old_words), row))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    useful = [row for score, row in ranked if score > 0][:5]
+    return useful or [row for _, row in ranked[:2]]
+
+
+def get_study_chat_history(username, notebook_id):
+    conn = db()
+    if notebook_id is None:
+        rows = conn.execute("SELECT * FROM study_chat_messages WHERE username=? AND notebook_id IS NULL ORDER BY id DESC LIMIT 20", (username,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM study_chat_messages WHERE username=? AND notebook_id=? ORDER BY id DESC LIMIT 20", (username, notebook_id)).fetchall()
+    conn.close()
+    return list(reversed(rows))
 
 def study_notebooks():
     conn = db()
@@ -1185,14 +1258,14 @@ def study_home():
     context = dashboard_context(conn)
     conn.close()
     badges, badge_count = get_study_achievements(session["user"])
-    context.update({"badges": badges, "badge_count": badge_count})
+    context.update({"badges": badges, "badge_count": badge_count, "study_streak": study_streak_data(session["user"])})
     return render_template("study_home.html", page="study", **context)
 
 @app.route("/study/achievements")
 @login_required
 def study_achievements():
     badges, badge_count = get_study_achievements(session["user"])
-    return render_template("study_achievements.html", page="study", badges=badges, badge_count=badge_count)
+    return render_template("study_achievements.html", page="study", badges=badges, badge_count=badge_count, study_streak=study_streak_data(session["user"]))
 
 
 @app.route("/study/sources")
@@ -1441,6 +1514,22 @@ def study_notebook_workspace(notebook_id):
         workspace_back_url=url_for("study_notebook", notebook_id=notebook_id),
         workspace_back_label="Notebook",
     )
+
+@app.route("/study/chat/feedback", methods=["POST"])
+@login_required
+def study_chat_feedback():
+    chat_id = request.form.get("chat_id", type=int)
+    helpful = request.form.get("helpful", type=int)
+    if chat_id is None or helpful not in (0, 1):
+        return jsonify(success=False, error="Invalid feedback."), 400
+    conn = db()
+    conn.execute("UPDATE study_chat_messages SET feedback=? WHERE id=? AND username=?", (helpful, chat_id, session["user"]))
+    conn.commit()
+    conn.close()
+    if helpful == 1:
+        study_activity(session["user"], "chat-helpful")
+    return redirect(request.referrer or url_for("study_home"))
+
 
 @app.route("/shop/redeem-form/<int:item_id>", methods=["POST"])
 @login_required
