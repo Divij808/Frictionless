@@ -185,3 +185,13 @@ Material:
 Questions:
 """
     return self._generate(prompt, 500)
+
+
+  def assistant_response(self, question, context=""):
+    prompt = f"""You are Epoch Assistant, the built-in productivity and learning assistant.
+Answer clearly and concisely. The application can manage tasks and schedules, habits, shopping rewards, goals, health records, quick links, and Study Hub notebooks, sources, flashcards and quizzes.
+Never claim you changed the user's data unless the application tool actually performed that change.
+{context}
+User: {question}
+Assistant:"""
+    return self._generate(prompt, 300)
