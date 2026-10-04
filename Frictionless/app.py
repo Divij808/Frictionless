@@ -1239,7 +1239,9 @@ def assistant_record(username, question, answer, intent, success, action=None):
             (intent, 1, int(success), dt.datetime.now().isoformat(timespec="seconds")),
         )
     conn.commit()
+    message_id = cur.lastrowid
     conn.close()
+    return message_id
 
 
 def assistant_general_answer(username, question):
