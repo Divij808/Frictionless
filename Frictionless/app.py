@@ -909,6 +909,14 @@ def health_section(section):
         "SELECT height_cm, weight_kg FROM users WHERE username=?", (username,)
     ).fetchone()
 
+    # The session can contain a username whose database row no longer exists.
+    # Never subscript None as if it were a user row.
+    if user is None:
+        conn.close()
+        session.clear()
+        flash("Your account could not be found. Please log in again.", "error")
+        return redirect(url_for("login"))
+
     bmi = None
     bmi_category = "Not available"
     calorie_budget = None
