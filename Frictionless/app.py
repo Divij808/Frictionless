@@ -1253,7 +1253,7 @@ If the user asks you to perform an action you cannot perform through the availab
 Never claim an action was completed unless the application actually completed it.
 """
     prompt = app_context + "\n" + example_text + "\nUser: " + question + "\nAssistant:"
-    return get_epoch_ai()._generate(prompt, 280)
+    return get_epoch_ai().assistant_response(question, example_text)
 
 
 @app.route("/api/assistant/history")
@@ -1394,6 +1394,7 @@ def study_notebook_create():
     conn = db()
     conn.execute("INSERT INTO notebooks(username,group_id,name,description,created_at) VALUES(?,?,?,?,?)", (session["user"], request.form.get("group_id") or None, name, request.form.get("description","").strip(), dt.datetime.now().isoformat(timespec="seconds")))
     conn.commit(); conn.close()
+    study_activity(session["user"], "notebook")
     return redirect(url_for("study_notebooks"))
 
 @app.route("/study/notebook/<int:notebook_id>")
