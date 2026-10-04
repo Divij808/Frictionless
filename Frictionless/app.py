@@ -1156,22 +1156,159 @@ def study_card_edit(notebook_id, card_id):
     conn.close()
     return redirect(url_for("study_cards", notebook_id=notebook_id))
 
+def find_upcoming_exam(conn, username, notebook_id=None, card_exam_deadline=None):
+    """Return the nearest known exam date/time from this user's tasks/calendar."""
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    candidates = []
+    if card_exam_deadline:
+        try:
+            candidates.append(dt.datetime.fromisoformat(card_exam_deadline))
+        except ValueError:
+            pass
+
+    rows = conn.execute(
+        "SELECT deadline, task_date, start_time, name FROM tasks "
+        "WHERE username=? AND completed=0 AND deadline IS NOT NULL",
+        (username,)
+    ).fetchall()
+    exam_words = ("exam", "mock", "assessment", "test", "paper")
+    for row in rows:
+        if any(word in row["name"].lower() for word in exam_words):
+            try:
+                value = dt.datetime.fromisoformat(row["deadline"])
+                if value >= now:
+                    candidates.append(value)
+            except (ValueError, TypeError):
+                pass
+
+    service = get_calendar_service()
+    for event in calendar_events_between(service, now.date(), now.date() + dt.timedelta(days=60)):
+        summary = (event.get("summary") or "").lower()
+        if any(word in summary for word in exam_words) and event.get("date") and event["date"] >= now.date():
+            start_minutes = event.get("start", 0)
+            candidates.append(dt.datetime.combine(
+                event["date"], dt.time(start_minutes // 60, start_minutes % 60)
+            ))
+
+    return min(candidates) if candidates else None
+
+
+def schedule_flashcard_calendar_review(conn, card, due_at, notebook_name, exam_deadline=None):
+    """Create a single calendar review task for the card's next due date."""
+    username = card["username"]
+    service = get_calendar_service()
+
+    old_task_id = card["review_task_id"]
+    if old_task_id:
+        old_task = conn.execute(
+            "SELECT google_event_id FROM tasks WHERE id=? AND username=?",
+            (old_task_id, username)
+        ).fetchone()
+        if old_task and old_task["google_event_id"] and service:
+            try:
+                service.events().delete(
+                    calendarId="primary", eventId=old_task["google_event_id"]
+                ).execute()
+            except Exception as exc:
+                print(f"Calendar review cleanup error: {exc}")
+        conn.execute(
+            "UPDATE tasks SET completed=1 WHERE id=? AND username=?",
+            (old_task_id, username)
+        )
+
+    review_deadline = due_at
+    task_id = schedule_task(
+        conn, username, f"Review flashcard: {notebook_name}",
+        30, "Medium", 0, due_at.date(), "08:00", review_deadline, 0, service
+    )
+    conn.execute(
+        "UPDATE study_cards SET review_task_id=?, exam_deadline=? WHERE id=? AND username=?",
+        (task_id, exam_deadline.isoformat(timespec="minutes") if exam_deadline else None,
+         card["id"], username)
+    )
+    conn.commit()
+    return task_id
+
+
 @app.route("/study/notebook/<int:notebook_id>/cards/<int:card_id>/review", methods=["POST"])
 @login_required
 def study_card_review(notebook_id, card_id):
-    rating = request.form.get("rating", "again")
+    rating = request.form.get("rating", "again").lower()
     conn = db()
-    card = conn.execute("SELECT * FROM study_cards WHERE id=? AND username=? AND notebook_id=?", (card_id, session["user"], notebook_id)).fetchone()
-    if card:
+    card = conn.execute(
+        "SELECT * FROM study_cards WHERE id=? AND username=? AND notebook_id=?",
+        (card_id, session["user"], notebook_id)
+    ).fetchone()
+
+    if not card:
+        conn.close()
+        return redirect(url_for("study_cards", notebook_id=notebook_id))
+
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    current_interval = max(0, int(card["interval_days"] or 0))
+    current_ease = float(card["ease"] or 2.5)
+
+    # Anki-style progression, with a deliberate rule that normal reviews
+    # never return on the same calendar date.
+    if rating == "again":
+        interval = 1
+        ease = max(1.3, current_ease - 0.20)
+    elif rating == "hard":
+        interval = max(2, round(max(1, current_interval) * 1.2))
+        ease = max(1.3, current_ease - 0.15)
+    else:
+        interval = 1 if current_interval == 0 else max(2, round(current_interval * current_ease))
+        ease = min(3.0, current_ease + 0.10)
+
+    next_due = now + dt.timedelta(days=interval)
+
+    # If an exam is approaching, bring the review forward so the card is
+    # reviewed before the exam. Same-day scheduling is only permitted when
+    # there is an actual exam on that date.
+    exam_deadline = find_upcoming_exam(conn, session["user"], notebook_id, card["exam_deadline"])
+    if exam_deadline:
+        exam_date = exam_deadline.date()
+        if exam_date == now.date():
+            next_due = max(now + dt.timedelta(minutes=30), exam_deadline - dt.timedelta(minutes=30))
+        elif exam_date < next_due.date():
+            next_due = dt.datetime.combine(
+                exam_date - dt.timedelta(days=1), dt.time(18, 0)
+            )
+            if next_due.date() < now.date():
+                next_due = exam_deadline
+        if next_due <= now:
+            next_due = exam_deadline
+
+    due = next_due.isoformat(timespec="seconds")
+    conn.execute(
+        "UPDATE study_cards SET interval_days=?,ease=?,due_at=?,reps=reps+1 WHERE id=?",
+        (interval, ease, due, card_id)
+    )
+    conn.commit()
+
+    updated_card = conn.execute(
+        "SELECT * FROM study_cards WHERE id=? AND username=?",
+        (card_id, session["user"])
+    ).fetchone()
+    notebook = conn.execute(
+        "SELECT name FROM notebooks WHERE id=? AND username=?",
+        (notebook_id, session["user"])
+    ).fetchone()
+
+    try:
+        schedule_flashcard_calendar_review(
+            conn, updated_card, next_due, notebook["name"],
+            exam_deadline=exam_deadline
+        )
         if rating == "again":
-            interval, ease = 0, max(1.3, card["ease"] - 0.2)
+            flash(f"Again — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
         elif rating == "hard":
-            interval, ease = max(1, round(max(1, card["interval_days"]) * 1.2)), max(1.3, card["ease"] - 0.15)
+            flash(f"Hard — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
         else:
-            interval, ease = (1 if card["interval_days"] == 0 else round(card["interval_days"] * card["ease"])), min(3.0, card["ease"] + 0.1)
-        due = (dt.datetime.now() + dt.timedelta(days=interval)).isoformat(timespec="seconds")
-        conn.execute("UPDATE study_cards SET interval_days=?,ease=?,due_at=?,reps=reps+1 WHERE id=?", (interval, ease, due, card_id))
-        conn.commit()
+            flash(f"Good — next review scheduled for {next_due.strftime('%A %d %B')}.", "success")
+    except Exception as exc:
+        flash(f"Card progress was saved, but the calendar could not be updated: {exc}", "error")
+
     conn.close()
     return redirect(url_for("study_cards", notebook_id=notebook_id))
 
