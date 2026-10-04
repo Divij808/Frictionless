@@ -1337,7 +1337,9 @@ def study_card_review(notebook_id, card_id):
     # If an exam is approaching, bring the review forward so the card is
     # reviewed before the exam. Same-day scheduling is only permitted when
     # there is an actual exam on that date.
-    exam_deadline = find_upcoming_exam(conn, session["user"], notebook_id, card["exam_deadline"])
+    exam_deadline = None
+    if card["calendar_enabled"]:
+        exam_deadline = find_upcoming_exam(conn, session["user"], notebook_id, card["exam_deadline"])
     if exam_deadline:
         exam_date = exam_deadline.date()
         if exam_date == now.date():
@@ -1367,19 +1369,22 @@ def study_card_review(notebook_id, card_id):
         (notebook_id, session["user"])
     ).fetchone()
 
-    try:
-        schedule_flashcard_calendar_review(
-            conn, updated_card, next_due, notebook["name"],
-            exam_deadline=exam_deadline
-        )
-        if rating == "again":
-            flash(f"Again — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
-        elif rating == "hard":
-            flash(f"Hard — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
-        else:
-            flash(f"Good — next review scheduled for {next_due.strftime('%A %d %B')}.", "success")
-    except Exception as exc:
-        flash(f"Card progress was saved, but the calendar could not be updated: {exc}", "error")
+    if updated_card["calendar_enabled"]:
+        try:
+            schedule_flashcard_calendar_review(
+                conn, updated_card, next_due, notebook["name"],
+                exam_deadline=exam_deadline
+            )
+            if rating == "again":
+                flash(f"Again — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
+            elif rating == "hard":
+                flash(f"Hard — next review scheduled for {next_due.strftime('%A %d %B')}.", "info")
+            else:
+                flash(f"Good — next review scheduled for {next_due.strftime('%A %d %B')}.", "success")
+        except Exception as exc:
+            flash(f"Card progress was saved, but the calendar could not be updated: {exc}", "error")
+    else:
+        flash(f"{rating.title()} — next review due {next_due.strftime('%A %d %B')}. Calendar scheduling is off.", "info")
 
     conn.close()
     return redirect(url_for("study_cards", notebook_id=notebook_id))
