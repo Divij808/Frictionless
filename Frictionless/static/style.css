@@ -62,3 +62,5 @@
 /* Study streaks and AI learning */
 .study-progress-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.study-progress-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)}.study-progress-card span{display:block;color:var(--muted);font-size:11px;font-weight:800}.study-progress-card strong{display:block;font-size:25px;margin:5px 0}.study-progress-card small{color:var(--muted);font-size:10px}.study-chat-feedback{display:flex;align-items:center;gap:6px;margin-top:9px;color:var(--muted);font-size:10px}.study-chat-feedback form{margin:0}.study-chat-feedback button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 7px;cursor:pointer}.study-chat-feedback button:hover{background:var(--soft);border-color:var(--accent)}
 @media(max-width:700px){.study-progress-grid{grid-template-columns:1fr}}
+
+.study-chat-beta{display:inline-block;margin-left:5px;padding:2px 5px;border-radius:5px;background:var(--soft);color:var(--accent);font-size:8px;vertical-align:middle;letter-spacing:.05em}
