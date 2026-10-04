@@ -130,6 +130,34 @@ def init_db():
     for col, definition in [("category", "TEXT DEFAULT 'general'"), ("entry_note", "TEXT DEFAULT ''")]:
         add_column_if_missing(conn, "health_metrics", col, definition)
 
+
+    # Notebook and flashcard schema/migrations.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS study_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
+            name TEXT NOT NULL, description TEXT DEFAULT '', icon TEXT DEFAULT '📚'
+        );
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
+            group_id INTEGER, name TEXT NOT NULL, description TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notebook_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL, source_id TEXT, title TEXT NOT NULL,
+            source_type TEXT NOT NULL, url TEXT DEFAULT '', chunks INTEGER DEFAULT 0,
+            characters INTEGER DEFAULT 0, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS study_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
+            notebook_id INTEGER NOT NULL, front TEXT NOT NULL, back TEXT NOT NULL,
+            interval_days INTEGER NOT NULL DEFAULT 0, ease REAL NOT NULL DEFAULT 2.5,
+            due_at TEXT NOT NULL, reps INTEGER NOT NULL DEFAULT 0,
+            exam_deadline TEXT, review_task_id INTEGER
+        );
+    """)
+    add_column_if_missing(conn, "study_cards", "exam_deadline", "TEXT")
+    add_column_if_missing(conn, "study_cards", "review_task_id", "INTEGER")
     # Remove the old General Schedule page completely.
     legacy = conn.execute("SELECT id FROM user_tabs WHERE name = 'General Schedule'").fetchall()
     for row in legacy:
