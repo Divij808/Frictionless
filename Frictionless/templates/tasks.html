@@ -8,12 +8,13 @@
 <label><input type="checkbox" name="locked"> Never automatically reschedule</label>
 <div><button class="btn">＋ Schedule Task</button></div>
 </form></section>
-<section class="card"><h2>Saved Tasks</h2><div class="task-list">
+<section class="card"><div class="schedule-head"><div><h2>Task List</h2><p class="meta">Start a task immediately or shuffle flexible tasks around your fixed calendar.</p></div><div class="actions"><form method="post" action="{{url_for('shuffle_tasks')}}" class="actions"><input type="hidden" name="task_date" value="{{today_date}}"><button class="btn secondary small">🔀 Shuffle Today</button></form></div></div><div class="task-list">
 {%for task in tasks%}<div class="task-row"><div><strong>{{task.name}}</strong><div class="meta">{{task.task_date or task.day}} · {{task.start_time}}–{{task.end_time}} · {{task.priority}} · Deadline {{task.deadline or 'Auto'}}</div></div><div class="actions">
+<form method="post" action="{{url_for('start_task_now',task_id=task.id)}}"><button class="btn small">▶ Start now</button></form>
 <a class="btn secondary small" href="{{url_for('edit_task_page',task_id=task.id)}}">Edit</a>
 <form method="post" action="{{url_for('toggle_complete',task_id=task.id)}}"><button class="btn green small">{%if task.completed%}Undo{%else%}Done +10 🪙{%endif%}</button></form>
 <form method="post" action="{{url_for('delete_task',task_id=task.id)}}"><button class="btn danger small">Delete</button></form>
 </div></div>{%else%}<div class="notice">No tasks yet.</div>{%endfor%}</div></section>
-<section class="card"><div class="schedule-head"><h2>Weekly Schedule</h2><div class="actions"><a class="btn secondary small" href="{{url_for('dashboard',week_offset=week_offset-1)}}">← Previous</a><a class="btn secondary small" href="{{url_for('dashboard')}}">Today</a><a class="btn secondary small" href="{{url_for('dashboard',week_offset=week_offset+1)}}">Next →</a></div></div><p>Week starting {{target_monday}}</p>
+<section class="card"><div class="schedule-head"><div><h2>Weekly Schedule</h2><p class="meta">Starting a task now automatically pushes flexible tasks later so they do not overlap.</p></div><div class="actions"><a class="btn secondary small" href="{{url_for('dashboard',week_offset=week_offset-1)}}">← Previous</a><a class="btn secondary small" href="{{url_for('dashboard')}}">Today</a><a class="btn secondary small" href="{{url_for('dashboard',week_offset=week_offset+1)}}">Next →</a></div></div><p>Week starting {{target_monday}}</p>
 <div class="week-grid">{%for day,data in day_schedules.items()%}<div class="day"><div class="day-head"><strong>{{day}}</strong><span>{{data.date}}</span></div>{%for item in data.timeline%}<div class="timeline-item {{item.kind}}"><strong>{{item.name if item.name is defined else item.text}}</strong>{%if item.start is defined%}<br><span class="meta">{{item.start}}–{{item.end}}</span>{%endif%}</div>{%endfor%}</div>{%endfor%}</div></section>
 {% endblock %}
