@@ -49,7 +49,7 @@ class LocalAI:
 
     return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
-  def answer_question(self, question, context):
+  def answer_question(self, question, context, memory=""):
     """Answers across the supplied evidence, including multi-part comparisons."""
     prompt = f"""
 Read ALL relevant parts of the text below before answering. If the question compares multiple concepts, address EVERY concept explicitly and compare them. Do not stop after answering the first part.
