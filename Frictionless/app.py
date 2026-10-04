@@ -1245,6 +1245,8 @@ def assistant_classify(message):
         return "list_tasks"
     if re.search(r"\b(mark|set|complete|finish|done)\b", lower) and (re.search(r"\b(task|it|this)\b", lower) or " done" in lower or lower.startswith("done")):
         return "complete_task"
+    if re.search(r"\b(create|make|add|start)\b", lower) and re.search(r"\bnotebook\b", lower):
+        return "create_notebook"
     if re.search(r"\b(study hub|notebook|flashcard|quiz)\b", lower):
         return "study_help"
     return "chat"
@@ -1359,7 +1361,7 @@ Never claim an action was completed unless the application actually completed it
 """
     learned = assistant_learning_context(username)
     prompt = app_context + "\n" + learned + "\n" + example_text + "\nUser: " + question + "\nAssistant:"
-    return get_epoch_ai().assistant_response(question, example_text)
+    return get_epoch_ai().assistant_response(question, learned + "\n" + example_text)
 
 
 @app.route("/api/assistant/history")
@@ -1434,7 +1436,22 @@ def assistant_chat():
                 conn.commit()
                 answer = f"Done — “{task['name']}” is marked complete and you earned {COINS_PER_COMPLETION} coins."
                 action = {"type": "complete_task", "task_id": task["id"]}
+                conn.execute("INSERT INTO app_activity(username,activity_type,created_at) VALUES(?,?,?)",(username,"task-completed",dt.datetime.now().isoformat(timespec="seconds")))
                 success = True
+        elif intent == "create_notebook":
+            match = re.search(r"(?:notebook\s*(?:called|named)?|(?:called|named))\s+(.+)$", message, flags=re.IGNORECASE)
+            name = match.group(1).strip(" .,!") if match else re.sub(r"^.*?notebook", "", message, flags=re.IGNORECASE).strip(" .,!") 
+            if not name:
+                name = "New Notebook"
+            cur = conn.execute(
+                "INSERT INTO notebooks(username,group_id,name,description,created_at) VALUES(?,?,?,?,?)",
+                (username, None, name[:120], "", dt.datetime.now().isoformat(timespec="seconds")),
+            )
+            conn.commit()
+            action = {"type": "create_notebook", "notebook_id": cur.lastrowid}
+            answer = f"Done — I created the notebook “{name[:120]}”."
+            success = True
+            study_activity(username, "notebook")
         elif intent == "study_help":
             answer = assistant_general_answer(username, message)
             success = True
