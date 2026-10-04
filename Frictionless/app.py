@@ -1148,10 +1148,10 @@ def assistant_parse_task(message):
         amount = int(match.group(1))
         duration = amount * 60 if match.group(2).startswith(("hour", "hr", "h")) else amount
     target = dt.date.today()
-    if "tomorrow" in lower:
-        target += dt.timedelta(days=1)
-    elif "day after tomorrow" in lower:
+    if "day after tomorrow" in lower:
         target += dt.timedelta(days=2)
+    elif "tomorrow" in lower:
+        target += dt.timedelta(days=1)
     else:
         iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", lower)
         if iso:
@@ -1200,11 +1200,11 @@ def assistant_parse_task(message):
 
 def assistant_classify(message):
     lower = message.lower()
-    if re.search(r"\b(add|create|schedule|remind|put)\b", lower) and re.search(r"\b(task|calendar|reminder)\b", lower):
+    if "remind me" in lower or (re.search(r"\b(add|create|schedule|put)\b", lower) and re.search(r"\b(task|calendar|reminder)\b", lower)):
         return "create_task"
     if re.search(r"\b(what('?s| is| do i have)|show|list|check)\b", lower) and re.search(r"\b(calendar|schedule|tasks?|today|tomorrow)\b", lower):
         return "list_tasks"
-    if re.search(r"\b(mark|set|complete|finish|done)\b", lower) and re.search(r"\b(task|it|this)\b", lower):
+    if re.search(r"\b(mark|set|complete|finish|done)\b", lower) and (re.search(r"\b(task|it|this)\b", lower) or " done" in lower or lower.startswith("done")):
         return "complete_task"
     if re.search(r"\b(study hub|notebook|flashcard|quiz)\b", lower):
         return "study_help"
@@ -1223,7 +1223,7 @@ def assistant_personal_examples(username, intent):
 
 def assistant_record(username, question, answer, intent, success, action=None):
     conn = db()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO assistant_messages(username,question,answer,intent,success,action_json,created_at) VALUES(?,?,?,?,?,?,?)",
         (username, question, answer, intent, int(success), json.dumps(action or {}, ensure_ascii=False), dt.datetime.now().isoformat(timespec="seconds")),
     )
@@ -1337,8 +1337,8 @@ def assistant_chat():
         answer = f"I couldn't complete that action: {exc}"
     finally:
         conn.close()
-    assistant_record(username, message, answer, intent, success, action)
-    return jsonify(success=True, answer=answer, intent=intent, action=action, learning=True)
+    message_id = assistant_record(username, message, answer, intent, success, action)
+    return jsonify(success=True, answer=answer, intent=intent, action=action, id=message_id, learning=True)
 
 
 @app.route("/api/assistant/feedback", methods=["POST"])
@@ -1353,10 +1353,13 @@ def assistant_feedback():
         conn.close()
         return jsonify(success=False), 404
     conn.execute("UPDATE assistant_messages SET success=? WHERE id=? AND username=?", (helpful, message_id, session["user"]))
-    row2 = conn.execute("SELECT uses,successes FROM assistant_skill_stats WHERE intent=?", (row["intent"],)).fetchone()
-    if row2:
-        delta = helpful - (1 if helpful == 0 else 0)
-        conn.execute("UPDATE assistant_skill_stats SET successes=MAX(0,successes+?),updated_at=? WHERE intent=?", (delta, dt.datetime.now().isoformat(timespec="seconds"), row["intent"]))
+    successes = conn.execute("SELECT COALESCE(SUM(success),0) FROM assistant_messages WHERE intent=?", (row["intent"],)).fetchone()[0]
+    uses = conn.execute("SELECT COUNT(*) FROM assistant_messages WHERE intent=?", (row["intent"],)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO assistant_skill_stats(intent,uses,successes,updated_at) VALUES(?,?,?,?) "
+        "ON CONFLICT(intent) DO UPDATE SET uses=excluded.uses,successes=excluded.successes,updated_at=excluded.updated_at",
+        (row["intent"], uses, successes, dt.datetime.now().isoformat(timespec="seconds")),
+    )
     conn.commit()
     conn.close()
     return jsonify(success=True)
