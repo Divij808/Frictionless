@@ -8,6 +8,24 @@
 <label><input type="checkbox" name="locked"> Never automatically reschedule</label>
 <div><button class="btn">＋ Schedule Task</button></div>
 </form></section>
+<section class="card google-calendar-card">
+<div class="calendar-status">
+  <div><div class="calendar-icon">📅</div><div><h2>Google Calendar</h2>
+  {% if google_calendar_connected %}<p class="calendar-connected">● Connected — Epoch can read your calendar and add scheduled tasks.</p>
+  {% elif google_calendar_configured %}<p class="calendar-disconnected">Not connected yet. Connect your Google account to sync your schedule.</p>
+  {% else %}<p class="calendar-disconnected">Add your Google OAuth <code>credentials.json</code> to enable Google Calendar.</p>{% endif %}
+  </div></div>
+  <div>
+  {% if google_calendar_connected %}
+    <form method="post" action="{{url_for('calendar_disconnect')}}"><button class="btn secondary small">Disconnect</button></form>
+  {% elif google_calendar_configured %}
+    <a class="btn small" href="{{url_for('calendar_connect')}}">Connect Google Calendar</a>
+  {% else %}
+    <span class="btn secondary small disabled">Not configured</span>
+  {% endif %}
+  </div>
+</div>
+</section>
 <section class="card"><h2>Saved Tasks</h2><div class="task-list">
 {%for task in tasks%}<div class="task-row"><div><strong>{{task.name}}</strong><div class="meta">{{task.task_date or task.day}} · {{task.start_time}}–{{task.end_time}} · {{task.priority}} · Deadline {{task.deadline or 'Auto'}}</div></div><div class="actions">
 <a class="btn secondary small" href="{{url_for('edit_task_page',task_id=task.id)}}">Edit</a>
