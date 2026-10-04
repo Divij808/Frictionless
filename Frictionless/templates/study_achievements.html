@@ -2,5 +2,10 @@
 {% block title %}Achievements · Epoch{% endblock %}
 {% block content %}
 <div class="topbar"><div><h1>🏆 Study Achievements</h1><p>Complete study activities to unlock badges.</p></div><a class="btn secondary" href="{{url_for('study_home')}}">← Study Hub</a></div>
+<section class="study-progress-grid">
+  <div class="study-progress-card"><span>🔥 Current streak</span><strong>{{ study_streak.current }} days</strong><small>{% if study_streak.current %}Active{% else %}Start today{% endif %}</small></div>
+  <div class="study-progress-card"><span>🏅 Best streak</span><strong>{{ study_streak.best }} days</strong><small>Longest consecutive run.</small></div>
+  <div class="study-progress-card"><span>✨ Study XP</span><strong>{{ study_streak.xp }}</strong><small>Built from your study activity.</small></div>
+</section>
 <section class="card"><div class="achievement-summary"><strong>{{badge_count}} / {{badges|length}}</strong><span>badges unlocked</span></div><div class="badge-grid badge-grid-all">{% for badge in badges %}<div class="achievement-badge {% if badge.earned %}earned{% else %}locked{% endif %}"><div class="achievement-icon">{{badge.icon}}</div><div class="achievement-content"><strong>{{badge.name}}</strong><p>{{badge.description}}</p>{% if badge.earned %}<span>✓ Earned</span>{% else %}<div class="badge-progress"><span style="width:{{badge.progress}}%"></span></div><small>{{badge.current}} / {{badge.target}}</small>{% endif %}</div></div>{% endfor %}</div></section>
 {% endblock %}
