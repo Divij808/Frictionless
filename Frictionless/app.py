@@ -158,6 +158,7 @@ def init_db():
     """)
     add_column_if_missing(conn, "study_cards", "exam_deadline", "TEXT")
     add_column_if_missing(conn, "study_cards", "review_task_id", "INTEGER")
+    add_column_if_missing(conn, "study_cards", "calendar_enabled", "INTEGER NOT NULL DEFAULT 0")
     # Remove the old General Schedule page completely.
     legacy = conn.execute("SELECT id FROM user_tabs WHERE name = 'General Schedule'").fetchall()
     for row in legacy:
@@ -1114,6 +1115,7 @@ def study_cards(notebook_id):
         back = request.form.get("back", "").strip()
         deadline_raw = request.form.get("deadline", "").strip()
         is_exam = request.form.get("is_exam") == "1"
+        calendar_enabled = request.form.get("calendar_enabled") == "1"
 
         if front and back:
             exam_deadline = None
@@ -1128,10 +1130,11 @@ def study_cards(notebook_id):
                     return redirect(url_for("study_cards", notebook_id=notebook_id))
 
             cur = conn.execute(
-                "INSERT INTO study_cards(username,notebook_id,front,back,due_at,exam_deadline) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO study_cards(username,notebook_id,front,back,due_at,exam_deadline,calendar_enabled) VALUES(?,?,?,?,?,?,?)",
                 (session["user"], notebook_id, front, back,
                  dt.datetime.now().isoformat(timespec="seconds"),
-                 exam_deadline.isoformat(timespec="minutes") if is_exam and exam_deadline else None)
+                 exam_deadline.isoformat(timespec="minutes") if is_exam and exam_deadline else None,
+                 int(calendar_enabled))
             )
             conn.commit()
 
@@ -1160,11 +1163,10 @@ def study_cards(notebook_id):
                 except Exception as exc:
                     flash(f"Flashcard added, but the calendar review was not scheduled: {exc}", "error")
             else:
-                flash(
-                    "Flashcard added. Set an exam/review deadline to have Epoch automatically "
-                    "reschedule future reviews on your calendar.",
-                    "success"
-                )
+                if calendar_enabled:
+                    flash("Flashcard added. Calendar scheduling is enabled; future reviews will be rescheduled automatically.", "success")
+                else:
+                    flash("Flashcard added. No calendar scheduling was requested.", "success")
             conn.commit()
 
     cards = conn.execute(
@@ -1174,6 +1176,38 @@ def study_cards(notebook_id):
     conn.close()
     return render_template("study_cards.html", page="study", notebook=notebook, cards=cards)
 
+
+@app.route("/study/notebook/<int:notebook_id>/cards/generate", methods=["POST"])
+@login_required
+def study_cards_generate(notebook_id):
+    notebook = notebook_owned(notebook_id)
+    if not notebook:
+        return redirect(url_for("study_notebooks"))
+    retriever = Retriever(epoch_user_paths()[0] / f"notebook_{notebook_id}.json")
+    selected = retriever.documents
+    if not selected:
+        flash("Add notebook sources before generating flashcards with Epoch AI.", "error")
+        return redirect(url_for("study_cards", notebook_id=notebook_id))
+    context_text = "\n\n".join(f"[{item['filename']}]\n{item['text']}" for item in selected)[:18000]
+    try:
+        generated = get_epoch_ai().flashcards(context_text)
+        conn = db()
+        added = 0
+        for card in generated:
+            front = str(card.get("question", "")).strip()
+            back = str(card.get("answer", "")).strip()
+            if front and back:
+                conn.execute(
+                    "INSERT INTO study_cards(username,notebook_id,front,back,due_at,calendar_enabled) VALUES(?,?,?,?,?,0)",
+                    (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds"))
+                )
+                added += 1
+        conn.commit()
+        conn.close()
+        flash(f"Epoch AI generated {added} flashcards. You can edit every card before reviewing.", "success")
+    except Exception as exc:
+        flash(f"AI flashcard generation failed: {exc}", "error")
+    return redirect(url_for("study_cards", notebook_id=notebook_id))
 
 @app.route("/study/notebook/<int:notebook_id>/cards/<int:card_id>/edit", methods=["POST"])
 @login_required
