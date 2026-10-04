@@ -1084,12 +1084,49 @@ def study_cards(notebook_id):
     if request.method == "POST":
         front = request.form.get("front", "").strip()
         back = request.form.get("back", "").strip()
+        deadline_raw = request.form.get("deadline", "").strip()
         if front and back:
-            conn.execute("INSERT INTO study_cards(username,notebook_id,front,back,due_at) VALUES(?,?,?,?,?)", (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds")))
+            conn.execute("INSERT INTO study_cards(username,notebook_id,front,back,due_at) VALUES(?,?,?,?,?)",
+                         (session["user"], notebook_id, front, back, dt.datetime.now().isoformat(timespec="seconds")))
+            if deadline_raw:
+                try:
+                    deadline = dt.datetime.fromisoformat(deadline_raw)
+                    if deadline <= dt.datetime.now():
+                        raise ValueError("Deadline must be in the future.")
+                    # A flashcard review is a normal Epoch task, so it is automatically
+                    # placed into the user's schedule and Google Calendar.
+                    schedule_task(conn, session["user"], f"Review flashcards: {notebook['name']}",
+                                  30, "Medium", 0, deadline.date(), "08:00", deadline, 0,
+                                  get_calendar_service())
+                    flash(f"Flashcard added. I am adding a 30-minute review session to your calendar before {deadline.strftime('%A %d %B at %H:%M')}.", "success")
+                except ValueError as exc:
+                    flash(f"Flashcard was added, but the calendar review was not scheduled: {exc}", "error")
+            else:
+                flash("Flashcard added. Set a deadline next time to automatically schedule a calendar review.", "success")
             conn.commit()
     cards = conn.execute("SELECT * FROM study_cards WHERE username=? AND notebook_id=? ORDER BY due_at", (session["user"], notebook_id)).fetchall()
     conn.close()
     return render_template("study_cards.html", page="study", notebook=notebook, cards=cards)
+
+
+@app.route("/study/notebook/<int:notebook_id>/cards/<int:card_id>/edit", methods=["POST"])
+@login_required
+def study_card_edit(notebook_id, card_id):
+    conn = db()
+    card = conn.execute("SELECT * FROM study_cards WHERE id=? AND username=? AND notebook_id=?",
+                        (card_id, session["user"], notebook_id)).fetchone()
+    if not card:
+        conn.close()
+        return redirect(url_for("study_cards", notebook_id=notebook_id))
+    front = request.form.get("front", "").strip()
+    back = request.form.get("back", "").strip()
+    if front and back:
+        conn.execute("UPDATE study_cards SET front=?, back=? WHERE id=? AND username=?",
+                     (front, back, card_id, session["user"]))
+        conn.commit()
+        flash("Flashcard updated.", "success")
+    conn.close()
+    return redirect(url_for("study_cards", notebook_id=notebook_id))
 
 @app.route("/study/notebook/<int:notebook_id>/cards/<int:card_id>/review", methods=["POST"])
 @login_required
