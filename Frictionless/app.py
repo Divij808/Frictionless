@@ -1369,7 +1369,9 @@ def study_workspace():
                         for item in matches
                     )
                     try:
-                        answer = get_epoch_ai().answer_question(question, context_text)
+                        memory = study_chat_memory(session["user"], None, question)
+                        memory_text = "\n\n".join("Previous helpful question: " + item["question"] + "\nPrevious answer: " + item["answer"] for item in memory)
+                        answer = get_epoch_ai().answer_question(question, context_text, memory_text)
                         answer_sources = [
                             {
                                 "filename": item["filename"],
@@ -1381,6 +1383,7 @@ def study_workspace():
                             }
                             for item in matches
                         ]
+                        chat_id = save_study_chat(session["user"], None, question, answer, answer_sources)
                     except Exception as exc:
                         flash(f"AI generation failed: {exc}", "error")
 
@@ -1429,6 +1432,8 @@ def study_workspace():
         "document_sections": document_sections,
         "answer": answer,
         "answer_sources": answer_sources,
+        "chat_id": locals().get("chat_id"),
+        "chat_history": get_study_chat_history(session["user"], None),
         "question": question,
         "result": result,
         "result_title": result_title,
@@ -1473,7 +1478,9 @@ def study_notebook_workspace(notebook_id):
                     for item in matches
                 )
                 try:
-                    answer = get_epoch_ai().answer_question(question, context_text)
+                    memory = study_chat_memory(session["user"], notebook_id, question)
+                    memory_text = "\n\n".join("Previous helpful question: " + item["question"] + "\nPrevious answer: " + item["answer"] for item in memory)
+                    answer = get_epoch_ai().answer_question(question, context_text, memory_text)
                     answer_sources = [
                         {
                             "filename": source_map.get(item["source_id"], item["filename"]),
@@ -1485,6 +1492,7 @@ def study_notebook_workspace(notebook_id):
                         }
                         for item in matches
                     ]
+                    chat_id = save_study_chat(session["user"], notebook_id, question, answer, answer_sources)
                 except Exception as exc:
                     flash(f"AI generation failed: {exc}", "error")
 
@@ -1504,6 +1512,8 @@ def study_notebook_workspace(notebook_id):
         document_sections=document_sections,
         answer=answer,
         answer_sources=answer_sources,
+        chat_id=locals().get("chat_id"),
+        chat_history=get_study_chat_history(session["user"], notebook_id),
         question=question,
         result=None,
         result_title=None,
