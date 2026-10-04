@@ -57,6 +57,12 @@ def add_column_if_missing(conn, table, column, definition):
 def init_db():
     conn = db()
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS app_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
             password TEXT NOT NULL,
@@ -204,6 +210,14 @@ def init_db():
             uses INTEGER NOT NULL DEFAULT 0,
             successes INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS assistant_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            memory TEXT NOT NULL,
+            source TEXT DEFAULT 'user',
+            created_at TEXT NOT NULL,
+            UNIQUE(username, memory)
         );
     """)
     for col, definition in [("coins", "INTEGER NOT NULL DEFAULT 0"), ("height_cm", "REAL"), ("weight_kg", "REAL")]:
@@ -672,7 +686,13 @@ def move_task():
 def toggle_complete(task_id):
     conn=db(); task=conn.execute("SELECT completed FROM tasks WHERE id=? AND username=?",(task_id,session["user"])).fetchone()
     if task:
-        new=0 if task["completed"] else 1; conn.execute("UPDATE tasks SET completed=? WHERE id=?",(new,task_id)); delta=COINS_PER_COMPLETION if new else -COINS_PER_COMPLETION; conn.execute("UPDATE users SET coins=MAX(0,coins+?) WHERE username=?",(delta,session["user"])); conn.commit()
+        new=0 if task["completed"] else 1
+        conn.execute("UPDATE tasks SET completed=? WHERE id=?",(new,task_id))
+        delta=COINS_PER_COMPLETION if new else -COINS_PER_COMPLETION
+        conn.execute("UPDATE users SET coins=MAX(0,coins+?) WHERE username=?",(delta,session["user"]))
+        if new:
+            conn.execute("INSERT INTO app_activity(username,activity_type,created_at) VALUES(?,?,?)",(session["user"],"task-completed",dt.datetime.now().isoformat(timespec="seconds")))
+        conn.commit()
     conn.close(); return redirect(url_for("dashboard"))
 
 
@@ -1053,16 +1073,33 @@ def get_study_achievements(username):
     return badges, sum(1 for badge in badges if badge["earned"])
 
 def study_streak_data(username):
+    """Return the user's overall Epoch engagement streak.
+
+    A day counts when the user studies, asks the assistant, or completes a
+    scheduled task. This makes the streak represent using Epoch, not only
+    opening one particular Study Hub page.
+    """
     conn = db()
     rows = conn.execute(
-        "SELECT DISTINCT DATE(created_at) AS day FROM study_activity WHERE username=? ORDER BY day DESC",
-        (username,),
+        "SELECT DISTINCT DATE(created_at) AS day FROM study_activity WHERE username=? "
+        "UNION SELECT DISTINCT DATE(created_at) FROM app_activity WHERE username=? "
+        "ORDER BY day DESC",
+        (username, username),
     ).fetchall()
-    activity_row = conn.execute("SELECT COUNT(*) AS count FROM study_activity WHERE username=?", (username,)).fetchone()
+    activity_row = conn.execute(
+        "SELECT COUNT(*) AS count FROM study_activity WHERE username=?",
+        (username,),
+    ).fetchone()
+    app_row = conn.execute(
+        "SELECT COUNT(*) AS count FROM app_activity WHERE username=?",
+        (username,),
+    ).fetchone()
     conn.close()
+
     dates = [dt.date.fromisoformat(row["day"]) for row in rows if row["day"]]
     if not dates:
         return {"current": 0, "best": 0, "xp": 0, "activity_count": 0}
+
     date_set = set(dates)
     current = 0
     cursor = dt.date.today()
@@ -1071,6 +1108,7 @@ def study_streak_data(username):
     while cursor in date_set:
         current += 1
         cursor -= dt.timedelta(days=1)
+
     best = 0
     run = 0
     previous = None
@@ -1078,7 +1116,8 @@ def study_streak_data(username):
         run = run + 1 if previous and day == previous + dt.timedelta(days=1) else 1
         best = max(best, run)
         previous = day
-    activity_count = activity_row["count"] if activity_row else 0
+
+    activity_count = (activity_row["count"] if activity_row else 0) + (app_row["count"] if app_row else 0)
     return {"current": current, "best": best, "xp": activity_count * 10 + current * 5, "activity_count": activity_count}
 
 
@@ -1221,6 +1260,72 @@ def assistant_personal_examples(username, intent):
     return list(rows)
 
 
+def assistant_learning_context(username):
+    """Build user-specific context from actual application usage.
+
+    This is retrieval-based learning, not silent model retraining. The local
+    model receives recent successful interactions, preferences and app state
+    when it answers the user.
+    """
+    conn = db()
+    memories = conn.execute(
+        "SELECT memory FROM assistant_memories WHERE username=? ORDER BY id DESC LIMIT 12",
+        (username,),
+    ).fetchall()
+    recent = conn.execute(
+        "SELECT question, intent, success FROM assistant_messages WHERE username=? ORDER BY id DESC LIMIT 8",
+        (username,),
+    ).fetchall()
+    task_count = conn.execute(
+        "SELECT COUNT(*) FROM tasks WHERE username=? AND completed=0",
+        (username,),
+    ).fetchone()[0]
+    study_count = conn.execute(
+        "SELECT COUNT(*) FROM study_activity WHERE username=?",
+        (username,),
+    ).fetchone()[0]
+    conn.close()
+
+    memory_text = "\n".join(f"- {row['memory']}" for row in memories) or "- No saved preferences yet."
+    recent_text = "\n".join(
+        f"- {row['question']} (intent={row['intent']}, successful={bool(row['success'])})"
+        for row in recent
+    ) or "- No previous assistant interactions yet."
+
+    return (
+        "User-specific learned context:\n"
+        f"Open tasks: {task_count}\n"
+        f"Study activities: {study_count}\n"
+        "Saved preferences:\n" + memory_text +
+        "\nRecent assistant interactions:\n" + recent_text
+    )
+
+
+def assistant_capture_memory(username, message):
+    """Store only explicit preference/memory statements from the user."""
+    lower = message.lower().strip()
+    prefixes = (
+        "remember that ",
+        "remember i ",
+        "i prefer ",
+        "i like ",
+        "i usually ",
+        "my goal is ",
+        "call me ",
+    )
+    if not lower.startswith(prefixes):
+        return
+    conn = db()
+    cleaned = re.sub(r"^(remember that|remember i|i prefer|i like|i usually|my goal is|call me)\s+", "", message.strip(), flags=re.IGNORECASE).strip()
+    if cleaned:
+        conn.execute(
+            "INSERT OR IGNORE INTO assistant_memories(username,memory,source,created_at) VALUES(?,?,?,?)",
+            (username, cleaned[:500], "user", dt.datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    conn.close()
+
+
 def assistant_record(username, question, answer, intent, success, action=None):
     conn = db()
     cur = conn.execute(
@@ -1252,7 +1357,8 @@ You can explain how to use Tasks & Schedule, Habits, Quick Links, Shopping, Loan
 If the user asks you to perform an action you cannot perform through the available tools, explain that limitation and give the exact page they can use.
 Never claim an action was completed unless the application actually completed it.
 """
-    prompt = app_context + "\n" + example_text + "\nUser: " + question + "\nAssistant:"
+    learned = assistant_learning_context(username)
+    prompt = app_context + "\n" + learned + "\n" + example_text + "\nUser: " + question + "\nAssistant:"
     return get_epoch_ai().assistant_response(question, example_text)
 
 
@@ -1284,6 +1390,7 @@ def assistant_chat():
     if not message:
         return jsonify(success=False, error="Enter a message."), 400
     username = session["user"]
+    assistant_capture_memory(username, message)
     intent = assistant_classify(message)
     answer = ""
     success = False
@@ -1340,7 +1447,11 @@ def assistant_chat():
     finally:
         conn.close()
     message_id = assistant_record(username, message, answer, intent, success, action)
-    return jsonify(success=True, answer=answer, intent=intent, action=action, id=message_id, learning=True)
+    conn = db()
+    conn.execute("INSERT INTO app_activity(username,activity_type,created_at) VALUES(?,?,?)",(username,"assistant-use",dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
+    return jsonify(success=True, answer=answer, intent=intent, action=action, id=message_id, learning=True, learned_context=True)
 
 
 @app.route("/api/assistant/feedback", methods=["POST"])
