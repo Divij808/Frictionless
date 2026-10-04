@@ -87,7 +87,7 @@
     const data=await response.json();
     body.innerHTML="";
     if(!data.messages.length){
-      addMessage("ai","Hi! I'm Epoch Assistant. I'm new to this application, so start by telling me what you want to do. I can learn which commands work and help you use the app. Try one of the examples below.");
+      addMessage("ai","Hi! I'm Epoch Assistant 👋 I'm ready to help you use Epoch. I start with a small set of skills, then improve my responses from your successful actions, feedback and explicit preferences. Try: “Add a task to revise maths tomorrow at 5pm for 1 hour”, “Create a notebook called Biology”, or “What is on my calendar today?”");
       if(data.first_use) open();
     } else {
       data.messages.forEach(m=>{ addMessage("user",m.question); addMessage("ai",m.answer,m.id); });
