@@ -3,3 +3,7 @@
 .study-actions{position:relative;z-index:2}.study-action,.study-nav-button{position:relative;z-index:3;pointer-events:auto}.study-action{cursor:pointer}.study-action-icon{display:block}.study-action .btn{margin-top:14px;pointer-events:none}
 
 .stack{display:flex;flex-direction:column;gap:12px}.pdf-viewer{padding:0;overflow:hidden}.pdf-viewer iframe{width:100%;height:80vh;border:0}.study-action{position:relative;z-index:3;cursor:pointer}.study-action .btn{display:inline-block;margin-top:10px}.study-actions{position:relative;z-index:2}
+
+
+/* Google Calendar integration */
+.google-calendar-card{margin-top:16px}.calendar-status{display:flex;justify-content:space-between;align-items:center;gap:18px}.calendar-status>div:first-child{display:flex;align-items:center;gap:12px}.calendar-icon{font-size:30px}.calendar-status h2{margin:0}.calendar-status p{margin:5px 0 0;font-size:12px;color:var(--muted)}.calendar-connected{color:#15803d!important}.calendar-disconnected{color:var(--muted)}.disabled{opacity:.55;pointer-events:none}@media(max-width:700px){.calendar-status{align-items:flex-start;flex-direction:column}}

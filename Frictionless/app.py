@@ -189,25 +189,93 @@ def login_required(fn):
     return wrapper
 
 
-def get_calendar_service():
+def calendar_token_path():
+    username = session.get("user", "default")
+    safe_user = "".join(ch for ch in username if ch.isalnum() or ch in ("-", "_")) or "user"
+    token_dir = Path("calendar_tokens")
+    token_dir.mkdir(parents=True, exist_ok=True)
+    return token_dir / f"{safe_user}.json"
+
+
+def google_calendar_connected():
+    if not (build and os.path.exists("credentials.json")):
+        return False
+    token_path = calendar_token_path()
+    if not token_path.exists():
+        return False
+    try:
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+        if creds and creds.valid:
+            return True
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json(), encoding="utf-8")
+            return True
+    except Exception as exc:
+        print(f"Calendar status error: {exc}")
+    return False
+
+
+def get_calendar_service(authenticate=False):
+    """Return the signed-in user's Google Calendar service.
+
+    Normal page loads are silent. OAuth is only started when the user explicitly
+    clicks Connect Google Calendar.
+    """
     if not (build and os.path.exists("credentials.json")):
         return None
+
+    token_path = calendar_token_path()
     try:
         creds = None
-        if os.path.exists("token.json"):
-            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open("token.json", "w") as token:
-                token.write(creds.to_json())
+        if token_path.exists():
+            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
+        if creds and creds.valid:
+            return build("calendar", "v3", credentials=creds)
+
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json(), encoding="utf-8")
+            return build("calendar", "v3", credentials=creds)
+
+        if not authenticate:
+            return None
+
+        flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+        creds = flow.run_local_server(port=0)
+        token_path.write_text(creds.to_json(), encoding="utf-8")
         return build("calendar", "v3", credentials=creds)
     except Exception as exc:
         print(f"Calendar authentication error: {exc}")
         return None
+
+
+@app.route("/calendar/connect")
+@login_required
+def calendar_connect():
+    if not os.path.exists("credentials.json"):
+        flash("Google Calendar is not configured yet. Add credentials.json from your Google Cloud OAuth client first.", "error")
+        return redirect(url_for("dashboard"))
+    service = get_calendar_service(authenticate=True)
+    if service:
+        flash("Google Calendar connected successfully. Epoch will now use it when scheduling tasks.", "success")
+    else:
+        flash("Google Calendar could not be connected. Check your Google OAuth credentials.", "error")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/calendar/disconnect", methods=["POST"])
+@login_required
+def calendar_disconnect():
+    token_path = calendar_token_path()
+    try:
+        if token_path.exists():
+            token_path.unlink()
+        flash("Google Calendar disconnected. Your Epoch tasks remain saved locally.", "success")
+    except OSError as exc:
+        flash(f"Could not disconnect Google Calendar: {exc}", "error")
+    return redirect(url_for("dashboard"))
 
 
 def time_to_minutes(value):
@@ -614,7 +682,7 @@ def dashboard():
     try: week_offset=int(request.args.get("week_offset",0))
     except ValueError: week_offset=0
     schedules,monday=build_schedule(conn,username,week_offset)
-    context=dashboard_context(conn); context.update({"page":"dashboard","day_schedules":schedules,"week_offset":week_offset,"target_monday":monday.strftime("%B %d, %Y"),"today_date":dt.date.today().isoformat()})
+    context=dashboard_context(conn); context.update({"page":"dashboard","day_schedules":schedules,"week_offset":week_offset,"target_monday":monday.strftime("%B %d, %Y"),"today_date":dt.date.today().isoformat(),"google_calendar_connected":google_calendar_connected(),"google_calendar_configured":os.path.exists("credentials.json")})
     conn.close(); return render_template("tasks.html",**context)
 
 
