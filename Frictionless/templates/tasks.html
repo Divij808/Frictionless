@@ -8,6 +8,24 @@
 <label><input type="checkbox" name="locked"> Never automatically reschedule</label>
 <div><button class="btn">＋ Schedule Task</button></div>
 </form></section>
+<section class="card google-calendar-card">
+<div class="calendar-status">
+  <div><div class="calendar-icon">📅</div><div><h2>Google Calendar</h2>
+  {% if google_calendar_connected %}<p class="calendar-connected">● Connected — Epoch can read your calendar and add scheduled tasks.</p>
+  {% elif google_calendar_configured %}<p class="calendar-disconnected">Not connected yet. Connect your Google account to sync your schedule.</p>
+  {% else %}<p class="calendar-disconnected">Add your Google OAuth <code>credentials.json</code> to enable Google Calendar.</p>{% endif %}
+  </div></div>
+  <div>
+  {% if google_calendar_connected %}
+    <form method="post" action="{{url_for('calendar_disconnect')}}"><button class="btn secondary small">Disconnect</button></form>
+  {% elif google_calendar_configured %}
+    <a class="btn small" href="{{url_for('calendar_connect')}}">Connect Google Calendar</a>
+  {% else %}
+    <span class="btn secondary small disabled">Not configured</span>
+  {% endif %}
+  </div>
+</div>
+</section>
 <section class="card"><div class="schedule-head"><div><h2>Task List</h2><p class="meta">Start a task immediately or shuffle flexible tasks around your fixed calendar.</p></div><div class="actions"><form method="post" action="{{url_for('shuffle_tasks')}}" class="actions"><input type="hidden" name="task_date" value="{{today_date}}"><button class="btn secondary small">🔀 Shuffle Today</button></form></div></div><div class="task-list">
 {%for task in tasks%}<div class="task-row"><div><strong>{{task.name}}</strong><div class="meta">{{task.task_date or task.day}} · {{task.start_time}}–{{task.end_time}} · {{task.priority}} · Deadline {{task.deadline or 'Auto'}}</div></div><div class="actions">
 <form method="post" action="{{url_for('start_task_now',task_id=task.id)}}"><button class="btn small">▶ Start now</button></form>
