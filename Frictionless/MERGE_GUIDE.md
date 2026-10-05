@@ -102,7 +102,76 @@ The additional Study Hub dependencies include:
 
 The existing Epoch Google Calendar dependencies remain listed as well.
 
-## 8. Run the application
+## 8. Set up Google Calendar
+
+The original Frictionless application already included Google Calendar scheduling. Epoch keeps that scheduling system, but the Google account must be connected explicitly.
+
+### Step 1 — Create Google OAuth credentials
+
+1. Open the Google Cloud Console.
+2. Create or select a Google Cloud project.
+3. Enable the **Google Calendar API**.
+4. Configure the OAuth consent screen.
+5. Create an **OAuth client ID** for a desktop application.
+6. Download the credentials JSON file.
+7. Rename the downloaded file to **credentials.json**.
+8. Put **credentials.json** in the same directory as `app.py`.
+
+Do not commit `credentials.json` to GitHub.
+
+### Step 2 — Install the Calendar packages
+
+Run:
+
+```bash
+pip install google-auth google-auth-oauthlib google-api-python-client
+```
+
+These packages are also included in the project's requirements.
+
+### Step 3 — Start Epoch
+
+Run:
+
+```bash
+python quickstart.py
+python app.py
+```
+
+### Step 4 — Connect Google Calendar
+
+1. Log in to Epoch.
+2. Open **Tasks & Schedule**.
+3. Find the **Google Calendar** section.
+4. Select **Connect Google Calendar**.
+5. Complete the Google OAuth login in the browser.
+6. Return to Epoch.
+
+Epoch stores the OAuth token separately for each Epoch user in:
+
+```text
+calendar_tokens/<username>.json
+```
+
+The token files should not be committed to GitHub.
+
+### Step 5 — Test Calendar scheduling
+
+Create a task with a duration and deadline.
+
+Epoch should:
+
+1. Check the user's Google Calendar.
+2. Find an available time.
+3. Create the task in Epoch.
+4. Add the scheduled task to Google Calendar.
+5. Avoid conflicts with existing calendar events.
+6. Move flexible tasks when a calendar conflict is detected.
+7. Keep locked tasks from being automatically moved.
+
+If Google Calendar is not connected, Epoch continues to schedule tasks locally without starting an OAuth login automatically.
+
+## 9. Run the application
 
 From the `Epoch` directory:
 
@@ -114,7 +183,7 @@ Then open the Flask address shown in the terminal.
 
 Create an account or log in, then select **Study Hub** from the navigation.
 
-## 9. Test the merged application
+## 10. Test the merged application
 
 Test in this order:
 
@@ -146,7 +215,7 @@ Test in this order:
 - Generate practice questions.
 - Delete the source and confirm it disappears.
 
-## 10. Important first-run note
+## 11. Important first-run note
 
 The local AI model is loaded lazily: it is not loaded when the Flask application starts. It is loaded the first time the Study Hub Workspace needs AI generation.
 
@@ -156,7 +225,7 @@ The default model is:
 
 You can change it with the `EPOCH_MODEL` environment variable.
 
-## 11. Git structure
+## 12. Git structure
 
 The final structure is conceptually:
 
